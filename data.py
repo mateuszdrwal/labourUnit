@@ -1,51 +1,66 @@
 teams = {
-'ducks quack': {
-'name': 'Ducks Quack',
+ 'ducks quack': {
+ 'name': 'Ducks Quack',
  'points': 215,
- 'eslId': 11673541
+ 'eslId': 11673541,
+ 'channelId': 374855080635269123
 },
  'smash dash': {
-'name': 'Smash Dash',
+ 'name': 'Smash Dash',
  'points': 165,
- 'eslId': 11808346
+ 'eslId': 11808346,
+ 'channelId': 375618202300055553
 },
  'spinderella': {
-'name': 'Spinderella',
+ 'name': 'Spinderella',
  'points': 110,
- 'eslId': 11717826
+ 'eslId': 11717826,
+ 'channelId': 375754218281107457
 },
  'frozen space': {
-'name': 'Frozen Space',
+ 'name': 'Frozen Space',
  'points': 55,
- 'eslId': 11868762
+ 'eslId': 11868762,
+ 'channelId': 375003036147253259
 },
  'help': {
-'name': 'Help',
+ 'name': 'Help',
  'points': 35,
- 'eslId': 11837586
+ 'eslId': 11837586,
+ 'channelId': 374855115380752386
 },
  'broken': {
-'name': 'Broken',
+ 'name': 'Broken',
  'points': 20,
- 'eslId': 11923862
+ 'eslId': 11923862,
+ 'channelId': 382989917795385344
 },
  'kitty': {
-'name': 'Kitty',
+ 'name': 'Kitty',
  'points': 15,
- 'eslId': 11890270
+ 'eslId': 11890270,
+ 'channelId': 377589454132609035
 },
  'bounce': {
-'name': 'Bounce',
+ 'name': 'Bounce',
  'points': 10,
- 'eslId': 11949442
+ 'eslId': 11949442,
+ 'channelId': 389523729438212108
 },
  'lenimini-booty': {
-'name': 'Team Lenimini-Booty',
+ 'name': 'Team Lenimini-Booty',
  'points': 5,
- 'eslId': 11996287
+ 'eslId': 11996287,
+ 'channelId': 392009792765427724
 },
  'oculbots': {
-'name': 'Oculbots',
- 'eslId': 12002886
+ 'name': 'Oculbots',
+ 'eslId': 12002886,
+ 'channelId': 393804967020068864
+},
+ 'test team': {
+ 'name': 'Test Team',
+ 'points': 0,
+ 'channelId': 394888978798477312
 }
 }
