@@ -43,10 +43,10 @@ async def updater():
                     proposedNick = user.nick.split(" | ")[0] + " | " + nick if user.nick != None else user.name + " | " + nick
                     if user.nick == proposedNick:
                         break
-                    #print(proposedNick,user.nick)
+                    #print(user.name, proposedNick.replace("\N{FIRE}",""), str(user.nick).replace("\N{FIRE}",""))
                     try:
                         await user.edit(nick=proposedNick, reason="updating user nickname")
-                        print("updating %s's nickname"%user.name)
+                        print("updated %s's nickname"%user.name)
                     except discord.errors.Forbidden:
                         pass
                     except discord.errors.HTTPException:
@@ -59,7 +59,7 @@ async def updater():
                         continue
                 try:
                     await user.edit(nick=proposedNick, reason="updating user nickname")
-                    print("updating %s's nickname"%user.name)
+                    print("updated %s's nickname"%user.name)
                 except discord.errors.Forbidden:
                     pass
 
@@ -73,6 +73,19 @@ async def updater():
                 continue
             teams[team]["points"] = int(entry[0])
 
+        #update role and channel order
+        roleoffset = 2
+        rolecount = len(guild.roles)-1
+        teamlist = []
+        tmp = teams.copy().items()
+        for team, metadata in tmp:
+            teamlist.append([metadata["points"], discord.utils.find(lambda r: r.name == team, guild.roles), client.get_channel(metadata["channelId"])])
+        teamlist.sort()
+        teamlist.reverse()
+        for i, team in enumerate(teamlist):
+            await team[1].edit(position=rolecount-i-roleoffset, reason="reordering roles according to current ESL ranking")
+            await team[2].edit(position=i+1, reason="reordering channels according to current ESL ranking")
+            
         #update emoji's
         tmp = teams.copy().items()
         for team, metadata in tmp:
@@ -166,7 +179,7 @@ async def on_message(message):
             teamname = " ".join(args[1:])
             
             newChannel = await guild.create_text_channel(name="team%s"%teamname.lower().replace(" ",""), category=teamsCategory, reason="creating new team")
-            newRole = await guild.create_role(name=teamname.lower(), reason="creating new team")
+            newRole = await guild.create_role(name=teamname.lower(), hoist=True, mentionable=True, reason="creating new team")
             await newChannel.set_permissions(newRole, manage_roles=True, manage_channels=True)
             
             teams[teamname.lower()] = {"name": teamname,

@@ -48,7 +48,7 @@ teams = {
  'channelId': 389523729438212108
 },
  'lenimini-booty': {
- 'name': 'Team Lenimini-Booty',
+ 'name': 'Lenimini-Booty',
  'points': 5,
  'eslId': 11996287,
  'channelId': 392009792765427724
@@ -56,12 +56,8 @@ teams = {
  'oculbots': {
  'name': 'Oculbots',
  'eslId': 12002886,
- 'channelId': 393804967020068864
-},
- 'test team': {
- 'name': 'Test Team',
- 'points': 0,
- 'channelId': 394888978798477312
+ 'channelId': 393804967020068864,
+ 'points': 0
 },
  'helix': {
  'name': 'Helix',
