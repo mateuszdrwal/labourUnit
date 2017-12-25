@@ -28,7 +28,7 @@ async def updater():
         #update nicknames
         for user in guild.members:
 
-            tmp = teams.items()
+            tmp = teams.copy().items()
             for team, metadata in tmp:
                 role = discord.utils.find(lambda r: r.name == team,user.roles)
                 if role == None: continue
@@ -66,14 +66,15 @@ async def updater():
         #update standings
         raw = http.request("GET", "https://toolbox.tet.io/go4/vrclechoarena_eu/season-1/").data #refactor, non-async aka blocking
         processed = re.findall(scoreboardPattern, str(raw.lower()))
-        for team, metadata in teams.items():
+        tmp = teams.copy().items()
+        for team, metadata in tmp:
             entry = discord.utils.find(lambda e: metadata["name"].lower() in e[1], processed)
             if entry == None:
                 continue
             teams[team]["points"] = int(entry[0])
 
         #update emoji's
-        tmp = teams.items()
+        tmp = teams.copy().items()
         for team, metadata in tmp:
             team = team.replace(" ","")
             eslId = metadata.get("eslId")
@@ -161,6 +162,7 @@ async def on_message(message):
                 await response.edit(content="you dont have enough permissions to do that!")
                 return
 
+            if args[-1] == "": args.pop(-1)
             teamname = " ".join(args[1:])
             
             newChannel = await guild.create_text_channel(name="team%s"%teamname.lower().replace(" ",""), category=teamsCategory, reason="creating new team")
@@ -175,12 +177,14 @@ async def on_message(message):
             await response.edit(content="created team \"%s\""%teamname)
             return
 
+
         elif args[0] == "remove":
             
             if not (message.author.guild_permissions.manage_roles and message.author.guild_permissions.manage_channels):
                 await response.edit(content="you dont have enough permissions to do that!")
                 return
-            
+
+            if args[-1] == "": args.pop(-1)
             teamname = " ".join(args[1:])
             
             if teamname.lower() not in teams:
@@ -198,6 +202,7 @@ async def on_message(message):
         if args[2] == "" and args[0] in "eslid rename":
             await response.edit(content="command \"!team %s\" requires 2 parameters"%args[0])
             return
+
         
         if args[0] == "eslid":
             
@@ -217,6 +222,7 @@ async def on_message(message):
             
             save()    
             await response.edit(content="set %s's esl team id to %s"%(args[2], args[1]))
+
             
         elif args[0] == "rename":
             teamNames = re.findall((r'"(.*?)" "(.*?)"'), message.content)

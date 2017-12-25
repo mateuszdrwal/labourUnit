@@ -62,5 +62,11 @@ teams = {
  'name': 'Test Team',
  'points': 0,
  'channelId': 394888978798477312
+},
+ 'helix': {
+ 'name': 'Helix',
+ 'points': 0,
+ 'channelId': 394935508725137410,
+ 'eslId': 12011919
 }
 }
