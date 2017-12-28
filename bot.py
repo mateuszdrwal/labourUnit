@@ -1,6 +1,8 @@
 import discord,asyncio,threading,urllib3,re,warnings
-from data import *
+from colorsys import rgb_to_hsv, hsv_to_rgb
+from math import sqrt
 from subprocess import Popen
+from data import *
 
 client = discord.Client()
 http = urllib3.PoolManager()
@@ -16,7 +18,51 @@ def save():
             .replace(",", ",\n")
             .replace("}", "\n}")
             )
+    f.write("\ncups = "+str(cups))
     f.close()
+
+def findColor(colors):
+    try:
+        while True:
+            colors.pop(colors.index([0,0,0]))
+    except ValueError:
+        pass
+
+    hsv = []
+    for color in colors:
+        color = rgb_to_hsv(color[0]/255,color[1]/255,color[2]/255)
+        hsv.append(color)
+
+    points = hsv
+
+    points.sort()
+    points.append([points[0][0]+1,points[0][1],points[0][2]])
+
+    limit = [0,0.7,0.7]
+
+    bestHueDistance = 0
+    for i in range(len(points)-1):
+        if points[i+1][0] - points[i][0] > bestHueDistance:
+            bestHue = (points[i][0] + points[i+1][0])/2
+            bestHueDistance = points[i+1][0] - points[i][0]
+            counter = i
+
+    bestPoint = [0,0]
+    bestDistance = 0
+    longest = sqrt(pow(255,2)+pow(255,2))
+    for x in range(int(limit[1]*255),256):
+        for y in range(int(limit[2]*255),256):
+            closest = sqrt(pow(x-points[counter][1]*255,2)+pow(y-points[counter][2]*255,2))
+            potential = sqrt(pow(x-points[counter+1][1]*255,2)+pow(x-points[counter+1][2]*255,2))
+            if potential < closest: closest = potential
+            if closest > bestDistance:
+                bestPoint = [x/255,y/255]
+                bestDistance = closest
+
+    result = hsv_to_rgb(bestHue,bestPoint[0],bestPoint[1])
+
+    return [int(result[0]*255),int(result[1]*255),int(result[2]*255)]
+
 
 
 async def updater():
@@ -124,17 +170,31 @@ async def updater():
 
 @client.event
 async def on_ready():
-    global guild, captains, teamsCategory, archiveCategory
+    global guild, captains, teamsCategory, archiveCategory, generalChannel
     print(client.user.name)
     print(client.user.id)
     
     guild = client.get_guild(374854809997803530)
     teamsCategory = client.get_channel(382992149307850758)
     archiveCategory = client.get_channel(382992652871925771)
+    generalChannel = client.get_channel(393889024961544192)
     captains = discord.utils.find(lambda r: r.name == "captains",guild.roles)
     
     await client.change_presence(game=discord.Game(name='Echo Combat',type=1))
 
+@client.event
+async def on_member_join(member):
+    global guild, generalChannel
+    await generalChannel.send(":wave:")#"Welcome %s to the champions server!\nAre you searching for a team?"%member.mention)
+##    while True:
+##        response = await client.wait_for("message")
+##        if response.channel == generalChannel and response.author == member:
+##            break
+##    if "yes" in response.content.lower():
+##        await generalChannel.send("Great! I'll give you the appropriate roles then. Good luck!")
+##        await member.edit(roles=member.roles+[discord.utils.find(lambda r: r.name == "searching for team", guild.roles)])
+
+    
 @client.event
 async def on_message(message):
     global debug, guild, teamsCategory, teams, archiveCategory
@@ -177,9 +237,12 @@ async def on_message(message):
 
             if args[-1] == "": args.pop(-1)
             teamname = " ".join(args[1:])
+
+            color = findColor(list(list(i.color.to_rgb()) for i in guild.roles))
+            color = discord.Color.from_rgb(color[0],color[1],color[2])
             
             newChannel = await guild.create_text_channel(name="team%s"%teamname.lower().replace(" ",""), category=teamsCategory, reason="creating new team")
-            newRole = await guild.create_role(name=teamname.lower(), hoist=True, mentionable=True, reason="creating new team")
+            newRole = await guild.create_role(name=teamname.lower(), hoist=True, mentionable=True, colour=color, reason="creating new team")
             await newChannel.set_permissions(newRole, manage_roles=True, manage_channels=True)
             
             teams[teamname.lower()] = {"name": teamname,
@@ -187,7 +250,8 @@ async def on_message(message):
                                "channelId": newChannel.id
                                }
             save()
-            await response.edit(content="created team \"%s\""%teamname)
+            await response.delete()
+            await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
             return
 
 
@@ -209,7 +273,8 @@ async def on_message(message):
             teams.pop(teamname.lower())
             save()
             
-            await response.edit(content="removed team \"%s\""%teamname)
+            await response.delete()
+            await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
             return
 
         if args[2] == "" and args[0] in "eslid rename":
@@ -234,8 +299,9 @@ async def on_message(message):
                 return
             
             save()    
-            await response.edit(content="set %s's esl team id to %s"%(args[2], args[1]))
-
+            await response.delete()
+            await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+            
             
         elif args[0] == "rename":
             teamNames = re.findall((r'"(.*?)" "(.*?)"'), message.content)
@@ -265,11 +331,24 @@ async def on_message(message):
             teams.pop(teamNames[1].lower())
             save()
 
-            await response.edit(content="renamed team \"%s\" to \"%s\""%(teamNames[1], teamNames[0]))
-
+            await response.delete()
+            await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+            
         else:
             await response.edit(content="unknown parameter to !team \"%s\""%args[0])
 
+    if message.content.startswith("!addcup "):
+        if not message.author.guild_permissions.manage_roles:
+            await response.edit(content="you dont have enough permissions to do that!")
+            return
+        
+        url = message.content.split(" ")[1]
+        raw = http.request("GET", url).data
+        
+        
+        save()
+        await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+            
 client.loop.create_task(updater())
 
 client.run(open("token","r").read())

@@ -55,9 +55,9 @@ teams = {
 },
  'oculbots': {
  'name': 'Oculbots',
+ 'points': 0,
  'eslId': 12002886,
- 'channelId': 393804967020068864,
- 'points': 0
+ 'channelId': 393804967020068864
 },
  'helix': {
  'name': 'Helix',
@@ -66,3 +66,4 @@ teams = {
  'eslId': 12011919
 }
 }
+cups = ['https://play.eslgaming.com/echoarena/europe/echoarena/major/vrclechoarena-europe/christmas-cup-2017/']
