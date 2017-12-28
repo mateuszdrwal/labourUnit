@@ -86,10 +86,11 @@ async def updater():
                     if captains in user.roles:
                         nick += u" \N{FIRE}"
 
-                    proposedNick = user.nick.split(" | ")[0] + " | " + nick if user.nick != None else user.name + " | " + nick
-                    if user.nick == proposedNick:
+                    proposedNick = user.nick.split(" | ")[0] + " | " + nick if user.nick != None else user.name.split(" | ")[0] + " | " + nick
+
+                    if (user.nick if user.nick != None else user.name) == proposedNick:
                         break
-                    #print(user.name, proposedNick.replace("\N{FIRE}",""), str(user.nick).replace("\N{FIRE}",""))
+                    
                     try:
                         await user.edit(nick=proposedNick, reason="updating user nickname")
                         print("updated %s's nickname"%user.name)
