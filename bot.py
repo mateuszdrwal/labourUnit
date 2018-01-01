@@ -75,28 +75,28 @@ async def updater():
     while True:
 
         #update nicknames
-        for user in guild.members:
+        for member in guild.members:
 
             tmp = teams.copy().items()
             for team, metadata in tmp:
-                role = discord.utils.find(lambda r: r.name == team,user.roles)
+                role = discord.utils.find(lambda r: r.name == team,member.roles)
                 if role == None: continue
                 nick = teams.get(role.name,None)
                 
                 if nick != None:
                     nick = nick["name"]
                     
-                    if captains in user.roles:
+                    if captains in member.roles:
                         nick += u" \N{FIRE}"
 
-                    proposedNick = user.nick.split(" | ")[0] + " | " + nick if user.nick != None else user.name.split(" | ")[0] + " | " + nick
+                    proposedNick = member.display_name.split(" | ")[0] + " | " + nick
 
-                    if (user.nick if user.nick != None else user.name) == proposedNick:
+                    if (member.display_name) == proposedNick:
                         break
                     
                     try:
-                        await user.edit(nick=proposedNick, reason="updating user nickname")
-                        print("updated %s's nickname"%user.name)
+                        await member.edit(nick=proposedNick, reason="updating user nickname")
+                        print("updated %s's nickname"%member.display_name)
                     except discord.errors.Forbidden:
                         pass
                     except discord.errors.HTTPException:
@@ -104,12 +104,12 @@ async def updater():
                     
                     break
             else:
-                proposedNick = user.nick.split(" | ")[0] if user.nick != None else None
-                if user.nick == proposedNick:
+                proposedNick = member.nick.split(" | ")[0] if member.nick != None else None
+                if member.nick == proposedNick:
                         continue
                 try:
-                    await user.edit(nick=proposedNick, reason="updating user nickname")
-                    print("updated %s's nickname"%user.name)
+                    await member.edit(nick=proposedNick, reason="updating user nickname")
+                    print("updated %s's nickname"%member.display_name)
                 except discord.errors.Forbidden:
                     pass
 
@@ -389,27 +389,27 @@ async def on_message(message):
         while True:
             async with message.channel.typing():
                 toPrune = []
-                for memberId, timestamp in candidates.items():
-                    user = client.get_user(memberId)
+                for userId, timestamp in candidates.items():
+                    user = client.get_user(userId)
                     if user not in guild.members:
-                        members.pop(memberId)
-                        canndidates.pop(memberId)
+                        members.pop(userId)
+                        canndidates.pop(userId)
                         save()
                         continue
-                    user = guild.get_member(memberId)
+                    member = guild.get_member(userId)
                     if timestamp < cutoff:
-                        for role in user.roles:
+                        for role in member.roles:
                             if role.name in exceptedRoles:
                                 break
                         else:
-                            toPrune.append(user)
+                            toPrune.append(member)
 
                 if toPrune == []:
                     await message.channel.send("no members to prune")
                     return
 
                 await message.channel.send("here is the list of members that would be pruned for not being online on discord for %s days:```%s```type the number of the members (space separated) to ignore, \"yes\" to accept or anything else to cancel"%
-                                           (days, "\n".join("%s. %s"%(i+1,user.display_name) for i, user in enumerate(toPrune)))
+                                           (days, "\n".join("%s. %s"%(i+1,member.display_name) for i, member in enumerate(toPrune)))
                                            )
 
             while True:
@@ -425,10 +425,10 @@ async def on_message(message):
 
             if response.content == "yes":
                 async with message.channel.typing():
-                    for user in toPrune:
-                        await user.kick(reason="pruning")
+                    for member in toPrune:
                         try:
-                            print("kicked %s"%user.display_name)
+                            await member.kick(reason="pruning")
+                            print("kicked %s"%member.display_name)
                         except discord.errors.Forbidden:
                             pass
                     await message.channel.send("done. kicked %s members"%len(toPrune))
@@ -440,7 +440,7 @@ async def on_message(message):
                     if num > len(candidates)-1:
                         continue
                     toPrune.pop(num)
-                candidates = {user.id: candidates.get(user.id) for user in toPrune}
+                candidates = {member.id: candidates.get(member.id) for member in toPrune}
                 
                 await message.channel.send("removed members from prune list")
             else:
