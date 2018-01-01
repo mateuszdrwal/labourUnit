@@ -1,8 +1,10 @@
-import discord,asyncio,threading,urllib3,re,warnings
+import discord,asyncio,threading,urllib3,re,warnings,time,sys,traceback
 from colorsys import rgb_to_hsv, hsv_to_rgb
 from math import sqrt
 from subprocess import Popen
 from data import *
+
+debug = False
 
 client = discord.Client()
 http = urllib3.PoolManager()
@@ -19,6 +21,7 @@ def save():
             .replace("}", "\n}")
             )
     f.write("\ncups = "+str(cups))
+    f.write("\nmembers = "+str(members))
     f.close()
 
 def findColor(colors):
@@ -169,9 +172,16 @@ async def updater():
         save()
         await asyncio.sleep(600)
 
+if not debug:
+    @client.event
+    async def on_error(event, *args, **kwargs):
+        global errorChannel, err, mateuszdrwal
+        err = sys.exc_info()
+        await errorChannel.send("%s\n```%s\n\n%s```"%(mateuszdrwal.mention,"".join(traceback.format_tb(err[2])),err[1].args[0]))
+
 @client.event
 async def on_ready():
-    global guild, captains, teamsCategory, archiveCategory, generalChannel
+    global guild, captains, teamsCategory, archiveCategory, generalChannel, errorChannel, mateuszdrwal
     print(client.user.name)
     print(client.user.id)
     
@@ -179,6 +189,8 @@ async def on_ready():
     teamsCategory = client.get_channel(382992149307850758)
     archiveCategory = client.get_channel(382992652871925771)
     generalChannel = client.get_channel(393889024961544192)
+    errorChannel = client.get_channel(394112817583882251)
+    mateuszdrwal = client.get_user(140504440930041856)
     captains = discord.utils.find(lambda r: r.name == "captains",guild.roles)
     
     await client.change_presence(game=discord.Game(name='Echo Combat',type=1))
@@ -195,7 +207,12 @@ async def on_member_join(member):
 ##        await generalChannel.send("Great! I'll give you the appropriate roles then. Good luck!")
 ##        await member.edit(roles=member.roles+[discord.utils.find(lambda r: r.name == "searching for team", guild.roles)])
 
-    
+@client.event
+async def on_member_update(before, after):
+    if before.status != discord.Status.offline and after.status == discord.Status.offline:
+        members[after.id] = time.time()
+        save()
+
 @client.event
 async def on_message(message):
     global debug, guild, teamsCategory, teams, archiveCategory
@@ -322,10 +339,11 @@ async def on_message(message):
                 return
 
             await client.get_channel(teams[teamNames[1].lower()]["channelId"]).edit(name="team%s"%teamNames[0].lower().replace(" ",""), reason="renaming team")
-            #await discord.utils.find(lambda r: r.name == teamNames[1].lower(), guild.roles).edit(name=teamNames[0].lower(), reason="renaming team")
+            await discord.utils.find(lambda r: r.name == teamNames[1].lower(), guild.roles).edit(name=teamNames[0].lower(), reason="renaming team")
             try:
                 await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ",""), guild.emojis).edit(name=teamNames[0].lower().replace(" ",""), reason="renaming team")
             except AttributeError:
+
                 pass
             teams[teamNames[1].lower()]["name"] = teamNames[0]
             teams[teamNames[0].lower()] = teams[teamNames[1].lower()]
@@ -338,7 +356,7 @@ async def on_message(message):
         else:
             await response.edit(content="unknown parameter to !team \"%s\""%args[0])
 
-    if message.content.startswith("!addcup "):
+    elif message.content.startswith("!addcup "):
         if not message.author.guild_permissions.manage_roles:
             await response.edit(content="you dont have enough permissions to do that!")
             return
@@ -349,6 +367,86 @@ async def on_message(message):
         
         save()
         await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+
+    elif message.content.startswith("!prune"):
+        if not message.author.guild_permissions.kick_members:
+            await message.channel.send("you dont have enough permissions to do that!")
+            return
+
+        try:
+            days = int(message.content.split(" ")[1])
+        except ValueError:
+            await message.channel.send("number of days must be an integer")
+            return
+        except IndexError:
+            await message.channel.send("usage: !prune <days>")
+            return
+
+        cutoff = time.time() - (60*60*24*days)
+        exceptedRoles = [i for i in teams]
+        candidates = members.copy()
+
+        while True:
+            async with message.channel.typing():
+                toPrune = []
+                for memberId, timestamp in candidates.items():
+                    user = client.get_user(memberId)
+                    if user not in guild.members:
+                        members.pop(memberId)
+                        canndidates.pop(memberId)
+                        save()
+                        continue
+                    user = guild.get_member(memberId)
+                    if timestamp < cutoff:
+                        for role in user.roles:
+                            if role.name in exceptedRoles:
+                                break
+                        else:
+                            toPrune.append(user)
+
+                if toPrune == []:
+                    await message.channel.send("no members to prune")
+                    return
+
+                await message.channel.send("here is the list of members that would be pruned for not being online on discord for %s days:```%s```type the number of the members (space separated) to ignore, \"yes\" to accept or anything else to cancel"%
+                                           (days, "\n".join("%s. %s"%(i+1,user.display_name) for i, user in enumerate(toPrune)))
+                                           )
+
+            while True:
+                response = await client.wait_for("message")
+                if response.channel == message.channel and response.author == message.author:
+                    break
+                await asyncio.sleep(0.1)
+
+            if response.content.startswith("!prune"): return
+
+            userlist = re.findall(r"\d{1,}", response.content)
+            userlist = [int(i)-1 for i in userlist]
+
+            if response.content == "yes":
+                async with message.channel.typing():
+                    for user in toPrune:
+                        await user.kick(reason="pruning")
+                        try:
+                            print("kicked %s"%user.display_name)
+                        except discord.errors.Forbidden:
+                            pass
+                    await message.channel.send("done. kicked %s members"%len(toPrune))
+                    return
+            elif userlist != []:
+                userlist.sort()
+                userlist.reverse()
+                for num in userlist:
+                    if num > len(candidates)-1:
+                        continue
+                    toPrune.pop(num)
+                candidates = {user.id: candidates.get(user.id) for user in toPrune}
+                
+                await message.channel.send("removed members from prune list")
+            else:
+                await message.channel.send("canceled.")
+                return
+                
             
 client.loop.create_task(updater())
 
