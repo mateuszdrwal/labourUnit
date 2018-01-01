@@ -1,4 +1,4 @@
-import discord,asyncio,threading,urllib3,re,warnings,time,sys,traceback
+import discord,asyncio,threading,urllib3,re,warnings,time,sys,traceback,aiohttp,async_timeout
 from colorsys import rgb_to_hsv, hsv_to_rgb
 from math import sqrt
 from subprocess import Popen
@@ -7,7 +7,6 @@ from data import *
 debug = False
 
 client = discord.Client()
-http = urllib3.PoolManager()
 scoreboardPattern = re.compile(r"<tr>.*?<td>.*?</td>.*?<td>(\d{1,5})</td>.*?<td><.*? target.*?>(.*?)</a></td>.*?</tr>")
 logoPattern = re.compile(r'src="(https://cdn-eslgaming.akamaized.net/play/eslgfx/gfx/logos/teams/.*?)" id="team_logo_overlay_image"')
 warnings.filterwarnings("ignore")
@@ -23,6 +22,12 @@ def save():
     f.write("\ncups = "+str(cups))
     f.write("\nmembers = "+str(members))
     f.close()
+
+async def request(url):
+    global http
+    with async_timeout.timeout(10):
+        async with http.get(url) as response:
+            return await response.text()
 
 def findColor(colors):
     try:
@@ -114,7 +119,7 @@ async def updater():
                     pass
 
         #update standings
-        raw = http.request("GET", "https://toolbox.tet.io/go4/vrclechoarena_eu/season-1/").data #refactor, non-async aka blocking
+        raw = await request("https://toolbox.tet.io/go4/vrclechoarena_eu/season-1/")
         processed = re.findall(scoreboardPattern, str(raw.lower()))
         tmp = teams.copy().items()
         for team, metadata in tmp:
@@ -144,7 +149,7 @@ async def updater():
             if eslId == None:
                 continue
             
-            raw = http.request("GET", "https://play.eslgaming.com/team/%s"%str(eslId)).data #refactor, non-async aka blocking
+            raw = await request("https://play.eslgaming.com/team/%s"%str(eslId))
             processed = re.findall(logoPattern,str(raw))[0]
             if "default.gif" in processed:
                 continue
@@ -181,7 +186,7 @@ if not debug:
 
 @client.event
 async def on_ready():
-    global guild, captains, teamsCategory, archiveCategory, generalChannel, errorChannel, mateuszdrwal
+    global guild, captains, teamsCategory, archiveCategory, generalChannel, errorChannel, mateuszdrwal, http
     print(client.user.name)
     print(client.user.id)
     
@@ -191,6 +196,9 @@ async def on_ready():
     generalChannel = client.get_channel(393889024961544192)
     errorChannel = client.get_channel(394112817583882251)
     mateuszdrwal = client.get_user(140504440930041856)
+
+    http = aiohttp.ClientSession()
+
     captains = discord.utils.find(lambda r: r.name == "captains",guild.roles)
     
     await client.change_presence(game=discord.Game(name='Echo Combat',type=1))
@@ -362,7 +370,7 @@ async def on_message(message):
             return
         
         url = message.content.split(" ")[1]
-        raw = http.request("GET", url).data
+        raw = await request(url)
         
         
         save()
