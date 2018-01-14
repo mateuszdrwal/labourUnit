@@ -1,13 +1,15 @@
-import discord,asyncio,threading,urllib3,re,warnings,time,sys,traceback,aiohttp,async_timeout
+import discord,asyncio,threading,urllib3,re,warnings,time,sys,traceback,aiohttp,async_timeout,datetime,random,os
 from colorsys import rgb_to_hsv, hsv_to_rgb
+from subprocess import Popen, PIPE
+from bs4 import BeautifulSoup
 from math import sqrt
-from subprocess import Popen
 from data import *
 
 debug = False
 
+devnull = open(os.devnull, "w")
+
 client = discord.Client()
-scoreboardPattern = re.compile(r"<tr>.*?<td>.*?</td>.*?<td>(\d{1,5})</td>.*?<td><.*? target.*?>(.*?)</a></td>.*?</tr>")
 logoPattern = re.compile(r'src="(https://cdn-eslgaming.akamaized.net/play/eslgfx/gfx/logos/teams/.*?)" id="team_logo_overlay_image"')
 warnings.filterwarnings("ignore")
 
@@ -28,6 +30,13 @@ async def request(url):
     with async_timeout.timeout(10):
         async with http.get(url) as response:
             return await response.text()
+
+async def requestLoaded(url):
+    global client
+    def blocking(url):
+        p = Popen(["chromium-browser","--headless","--dump-dom",url], stdout = PIPE)
+        return p.communicate()[0]
+    return await client.loop.run_in_executor(None, blocking, url)
 
 def findColor(colors):
     try:
@@ -101,7 +110,7 @@ async def updater():
                     
                     try:
                         await member.edit(nick=proposedNick, reason="updating user nickname")
-                        print("updated %s's nickname"%member.display_name)
+                        print("updated %s's nickname"%member.name)
                     except discord.errors.Forbidden:
                         pass
                     except discord.errors.HTTPException:
@@ -114,19 +123,22 @@ async def updater():
                         continue
                 try:
                     await member.edit(nick=proposedNick, reason="updating user nickname")
-                    print("updated %s's nickname"%member.display_name)
+                    print("updated %s's nickname"%member.name)
                 except discord.errors.Forbidden:
                     pass
 
         #update standings
         raw = await request("https://toolbox.tet.io/go4/vrclechoarena_eu/season-1/")
-        processed = re.findall(scoreboardPattern, str(raw.lower()))
+        soup = BeautifulSoup(raw)
         tmp = teams.copy().items()
         for team, metadata in tmp:
-            entry = discord.utils.find(lambda e: metadata["name"].lower() in e[1], processed)
-            if entry == None:
+            for child in soup.find("tbody").children:
+                if team in str(child).lower():
+                    entry = child
+                    break
+            else:
                 continue
-            teams[team]["points"] = int(entry[0])
+            teams[team]["points"] = int(entry.contents[3].contents[0])
 
         #update role and channel order
         roleoffset = 2
@@ -154,11 +166,11 @@ async def updater():
             if "default.gif" in processed:
                 continue
             
-            p = Popen(["sudo", "wget", "-O", "./emojis/%s_new.jpg"%team, processed])
+            p = Popen(["sudo", "wget", "-O", "./emojis/%s_new.jpg"%team, processed], stdout=devnull)
             while p.poll() == None:
                 await asyncio.sleep(0.5)
 
-            p = Popen(["sudo", "cmp", "./emojis/%s_new.jpg"%team, "./emojis/%s_old.jpg"%team])
+            p = Popen(["sudo", "cmp", "./emojis/%s_new.jpg"%team, "./emojis/%s_old.jpg"%team], stdout=devnull)
             while p.poll() == None:
                 await asyncio.sleep(0.5)
 
@@ -175,7 +187,49 @@ async def updater():
             Popen(["sudo", "cp", "./emojis/%s_new.jpg"%team, "./emojis/%s_old.jpg"%team])
 
         save()
-        await asyncio.sleep(600)
+        await asyncio.sleep(1200)
+
+async def cupTask():
+    global debug
+
+    await client.wait_until_ready()
+    await asyncio.sleep(5)
+
+    while True:
+        if len(cups) == 0:
+            await asyncio.sleep(60)
+            
+        cups.sort()
+        cup = cups[0]
+        if cup[0] < time.time():
+            cups.pop(0)
+            continue
+
+        await asyncio.sleep(cup[0]-time.time()-930)
+
+        raw = await requestLoaded(cup[1]+"/contestants/")                
+        soup = BeautifulSoup(raw)
+        elements = soup.findAll("div", attrs = {"class":"participant"})
+        for team, metadata in teams.items():
+            for element in elements:
+                if team in str(element).lower() and "Not checked in" in str(element):
+                    mention = discord.utils.find(lambda r: r.name == team, guild.roles).mention
+                    await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have 15 minutes left!"%mention)
+                    print("%s has not checked in, 15min left"%team)
+
+        await asyncio.sleep(cup[0]-time.time()-200)
+
+        raw = await requestLoaded(cup[1]+"/contestants/")                
+        soup = BeautifulSoup(raw)
+        elements = soup.findAll("div", attrs = {"class":"participant"})
+        for team, metadata in teams.items():
+            for element in elements:
+                if team in str(element).lower() and "Not checked in" in str(element):
+                    mention = discord.utils.find(lambda r: r.name == team, guild.roles).mention
+                    await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have only 3 minutes left! In the case that you wont make it, contact @ESL in the #eu_vr_challenger_league on the echo games server immediately. They should be able to help until the brackets are generated. Hurry!"%mention)
+                    print("%s has not checked in, 3min left"%team)
+
+        await asyncio.sleep(180)
 
 if not debug:
     @client.event
@@ -186,19 +240,19 @@ if not debug:
 
 @client.event
 async def on_ready():
-    global guild, captains, teamsCategory, archiveCategory, generalChannel, errorChannel, mateuszdrwal, http
+    global raw, guild, captains, teamsCategory, archiveCategory, generalChannel, errorChannel, mateuszdrwal, http
     print(client.user.name)
     print(client.user.id)
-    
+        
     guild = client.get_guild(374854809997803530)
     teamsCategory = client.get_channel(382992149307850758)
     archiveCategory = client.get_channel(382992652871925771)
-    generalChannel = client.get_channel(393889024961544192)
+    generalChannel = client.get_channel(374854809997803532)
     errorChannel = client.get_channel(394112817583882251)
     mateuszdrwal = client.get_user(140504440930041856)
 
     http = aiohttp.ClientSession()
-
+    
     captains = discord.utils.find(lambda r: r.name == "captains",guild.roles)
     
     await client.change_presence(game=discord.Game(name='Echo Combat',type=1))
@@ -206,25 +260,26 @@ async def on_ready():
 @client.event
 async def on_member_join(member):
     global guild, generalChannel
-    await generalChannel.send(":wave:")#"Welcome %s to the champions server!\nAre you searching for a team?"%member.mention)
-##    while True:
-##        response = await client.wait_for("message")
-##        if response.channel == generalChannel and response.author == member:
-##            break
-##    if "yes" in response.content.lower():
-##        await generalChannel.send("Great! I'll give you the appropriate roles then. Good luck!")
-##        await member.edit(roles=member.roles+[discord.utils.find(lambda r: r.name == "searching for team", guild.roles)])
+    await generalChannel.send("Welcome %s to the champions server!\nAre you searching for a team?"%member.mention)
+    while True:
+        response = await client.wait_for("message")
+        if response.channel == generalChannel and response.author == member:
+            break
+    for word in ["yes","yeah","yh","yep"]:
+        if word in response.content.lower():
+            await generalChannel.send("Great! I'll give you the appropriate roles then. Good luck!")
+            await member.edit(roles=member.roles+[discord.utils.find(lambda r: r.name == "searching for team", guild.roles)])
+            return
 
 @client.event
 async def on_member_update(before, after):
-    if before.status != discord.Status.offline and after.status == discord.Status.offline:
+    if (before.status != discord.Status.offline and after.status == discord.Status.offline) or after.status != discord.Status.offline:
         members[after.id] = time.time()
         save()
 
 @client.event
 async def on_message(message):
-    global debug, guild, teamsCategory, teams, archiveCategory
-    debug = message
+    global guild, teamsCategory, teams, archiveCategory
     
     if message.content == "!github":
         await message.channel.send("https://github.com/mateuszdrwal/labourUnit")
@@ -269,8 +324,7 @@ async def on_message(message):
             
             newChannel = await guild.create_text_channel(name="team%s"%teamname.lower().replace(" ",""), category=teamsCategory, reason="creating new team")
             newRole = await guild.create_role(name=teamname.lower(), hoist=True, mentionable=True, colour=color, reason="creating new team")
-            await newChannel.set_permissions(newRole, manage_roles=True, manage_channels=True)
-            
+                        
             teams[teamname.lower()] = {"name": teamname,
                                "points": 0,
                                "channelId": newChannel.id
@@ -294,6 +348,10 @@ async def on_message(message):
                 await response.edit(content="could not find team \"%s\""%teamname)
                 return
 
+            try:
+                await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ",""), guild.emojis).delete(reason="deleting team")
+            except AttributeError:
+                pass
             await discord.utils.find(lambda r: r.name == teamname.lower(), guild.roles).delete(reason="deleting team")
             await client.get_channel(teams[teamname.lower()]["channelId"]).edit(category=archiveCategory, reason="deleting team")
             teams.pop(teamname.lower())
@@ -351,8 +409,8 @@ async def on_message(message):
             try:
                 await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ",""), guild.emojis).edit(name=teamNames[0].lower().replace(" ",""), reason="renaming team")
             except AttributeError:
-
                 pass
+            
             teams[teamNames[1].lower()]["name"] = teamNames[0]
             teams[teamNames[0].lower()] = teams[teamNames[1].lower()]
             teams.pop(teamNames[1].lower())
@@ -364,16 +422,33 @@ async def on_message(message):
         else:
             await response.edit(content="unknown parameter to !team \"%s\""%args[0])
 
-    elif message.content.startswith("!addcup "):
+    elif message.content.startswith("!addcup"):
         if not message.author.guild_permissions.manage_roles:
-            await response.edit(content="you dont have enough permissions to do that!")
+            await message.channel.send("you dont have enough permissions to do that!")
+            return
+
+        args = message.content.split(" ")
+
+        try:
+            args[1]
+        except:
+            await message.channel.send("usage: !addcup <url>")
+            return
+
+        response = await message.channel.send("processing...")
+
+        soup = BeautifulSoup(await requestLoaded(args[1]))
+        try:
+            data = list(soup.body.find("div", attrs={"class":"c-league-information__schedule__entry o-flag"}).find("div", attrs={"class":"o-flag__body"}))[3].contents[0].split(",")[1]
+        except ValueError:
+            await response.edit(content="invalid url")
             return
         
-        url = message.content.split(" ")[1]
-        raw = await request(url)
-        
-        
+        timestamp = time.mktime(datetime.datetime.strptime(data, " %d %b %Y %H:%M CET").timetuple())
+        cups.append([int(timestamp),args[1]])
         save()
+        
+        await response.delete()
         await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
 
     elif message.content.startswith("!prune"):
@@ -391,7 +466,7 @@ async def on_message(message):
             return
 
         cutoff = time.time() - (60*60*24*days)
-        exceptedRoles = [i for i in teams]
+        exceptedRoles = [i for i in teams]+["bot"]
         candidates = members.copy()
 
         while True:
@@ -454,8 +529,10 @@ async def on_message(message):
             else:
                 await message.channel.send("canceled.")
                 return
+            
                 
             
 client.loop.create_task(updater())
+client.loop.create_task(cupTask())
 
 client.run(open("token","r").read())
