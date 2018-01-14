@@ -13,6 +13,10 @@ client = discord.Client()
 logoPattern = re.compile(r'src="(https://cdn-eslgaming.akamaized.net/play/eslgfx/gfx/logos/teams/.*?)" id="team_logo_overlay_image"')
 warnings.filterwarnings("ignore")
 
+def get_role(id):
+    global guild
+    return discord.utils.find(lambda r: r.id == id, guild.roles)
+
 def save():
     f = open("data.py","w")
     
@@ -93,7 +97,7 @@ async def updater():
 
             tmp = teams.copy().items()
             for team, metadata in tmp:
-                role = discord.utils.find(lambda r: r.name == team,member.roles)
+                role = discord.utils.find(lambda r: r.id == metadata["roleId"], member.roles)
                 if role == None: continue
                 nick = teams.get(role.name,None)
                 
@@ -146,7 +150,7 @@ async def updater():
         teamlist = []
         tmp = teams.copy().items()
         for team, metadata in tmp:
-            teamlist.append([metadata["points"], discord.utils.find(lambda r: r.name == team, guild.roles), client.get_channel(metadata["channelId"])])
+            teamlist.append([metadata["points"], get_role(metadata["roleId"]), client.get_channel(metadata["channelId"])])
         teamlist.sort()
         teamlist.reverse()
         for i, team in enumerate(teamlist):
@@ -212,8 +216,8 @@ async def cupTask():
         elements = soup.findAll("div", attrs = {"class":"participant"})
         for team, metadata in teams.items():
             for element in elements:
-                if team in str(element).lower() and "Not checked in" in str(element):
-                    mention = discord.utils.find(lambda r: r.name == team, guild.roles).mention
+                if metadata["eslId"] in str(element).lower() and "Not checked in" in str(element):
+                    mention = get_role(metadata["roleId"]).mention
                     await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have 15 minutes left!"%mention)
                     print("%s has not checked in, 15min left"%team)
 
@@ -224,8 +228,8 @@ async def cupTask():
         elements = soup.findAll("div", attrs = {"class":"participant"})
         for team, metadata in teams.items():
             for element in elements:
-                if team in str(element).lower() and "Not checked in" in str(element):
-                    mention = discord.utils.find(lambda r: r.name == team, guild.roles).mention
+                if metadata["eslId"] in str(element).lower() and "Not checked in" in str(element):
+                    mention = get_role(metadata["roleId"]).mention
                     await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have only 3 minutes left! In the case that you wont make it, contact @ESL in the #eu_vr_challenger_league on the echo games server immediately. They should be able to help until the brackets are generated. Hurry!"%mention)
                     print("%s has not checked in, 3min left"%team)
 
@@ -253,7 +257,7 @@ async def on_ready():
 
     http = aiohttp.ClientSession()
     
-    captains = discord.utils.find(lambda r: r.name == "captains",guild.roles)
+    captains = get_role(386988129816543235)
     
     await client.change_presence(game=discord.Game(name='Echo Combat',type=1))
 
@@ -268,7 +272,7 @@ async def on_member_join(member):
     for word in ["yes","yeah","yh","yep"]:
         if word in response.content.lower():
             await generalChannel.send("Great! I'll give you the appropriate roles then. Good luck!")
-            await member.edit(roles=member.roles+[discord.utils.find(lambda r: r.name == "searching for team", guild.roles)])
+            await member.edit(roles=member.roles+[get_role(390421232199401475)])
             return
 
 @client.event
@@ -327,7 +331,8 @@ async def on_message(message):
                         
             teams[teamname.lower()] = {"name": teamname,
                                "points": 0,
-                               "channelId": newChannel.id
+                               "channelId": newChannel.id,
+                               "roleId": newRole.id
                                }
             save()
             await response.delete()
@@ -352,7 +357,7 @@ async def on_message(message):
                 await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ",""), guild.emojis).delete(reason="deleting team")
             except AttributeError:
                 pass
-            await discord.utils.find(lambda r: r.name == teamname.lower(), guild.roles).delete(reason="deleting team")
+            await get_role(teams[teamname.lower()]["roleId"]).delete(reason="deleting team")
             await client.get_channel(teams[teamname.lower()]["channelId"]).edit(category=archiveCategory, reason="deleting team")
             teams.pop(teamname.lower())
             save()
@@ -405,7 +410,7 @@ async def on_message(message):
                 return
 
             await client.get_channel(teams[teamNames[1].lower()]["channelId"]).edit(name="team%s"%teamNames[0].lower().replace(" ",""), reason="renaming team")
-            await discord.utils.find(lambda r: r.name == teamNames[1].lower(), guild.roles).edit(name=teamNames[0].lower(), reason="renaming team")
+            await get_role(team[teamNames[1].lower()]["roleId"]).edit(name=teamNames[0].lower(), reason="renaming team")
             try:
                 await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ",""), guild.emojis).edit(name=teamNames[0].lower().replace(" ",""), reason="renaming team")
             except AttributeError:
