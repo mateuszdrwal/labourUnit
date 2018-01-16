@@ -13,6 +13,251 @@ client = discord.Client()
 logoPattern = re.compile(r'src="(https://cdn-eslgaming.akamaized.net/play/eslgfx/gfx/logos/teams/.*?)" id="team_logo_overlay_image"')
 warnings.filterwarnings("ignore")
 
+class botCommands:
+    async def ping(message):
+        await message.channel.send("pong!")
+
+    async def github(message):
+        await message.channel.send("https://github.com/mateuszdrwal/labourUnit")
+
+    async def addcup(message):
+        global cups
+        if not message.author.guild_permissions.manage_roles:
+            await message.channel.send("you dont have enough permissions to do that!")
+            return
+
+        args = message.content.split(" ")
+
+        try:
+            args[1]
+        except:
+            await message.channel.send("usage: !addcup <url>")
+            return
+
+        response = await message.channel.send("processing...")
+
+        soup = BeautifulSoup(await requestLoaded(args[1]))
+        try:
+            data = list(soup.body.find("div", attrs={"class":"c-league-information__schedule__entry o-flag"}).find("div", attrs={"class":"o-flag__body"}))[3].contents[0].split(",")[1]
+        except ValueError:
+            await response.edit(content="invalid url")
+            return
+        
+        timestamp = time.mktime(datetime.datetime.strptime(data, " %d %b %Y %H:%M CET").timetuple())
+        cups.append([int(timestamp),args[1]])
+        save()
+        
+        await response.delete()
+        await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+
+    async def prune(message):
+        global guild, members, debug
+        if not message.author.guild_permissions.kick_members:
+            await message.channel.send("you dont have enough permissions to do that!")
+            return
+
+        try:
+            days = int(message.content.split(" ")[1])
+        except ValueError:
+            await message.channel.send("number of days must be an integer")
+            return
+        except IndexError:
+            await message.channel.send("usage: !prune <days>")
+            return
+
+        cutoff = time.time() - (60*60*24*days)
+        exceptedRoles = [i for i in teams]+["bot"]
+        candidates = members.copy()
+
+        while True:
+            async with message.channel.typing():
+                toPrune = []
+                for userId, timestamp in candidates.items():
+                    user = client.get_user(userId)
+                    debug = guild.members
+                    if user not in guild.members:
+                        members.pop(userId)
+                        canndidates.pop(userId)
+                        save()
+                        continue
+                    member = guild.get_member(userId)
+                    if timestamp < cutoff:
+                        for role in member.roles:
+                            if role.name in exceptedRoles:
+                                break
+                        else:
+                            toPrune.append(member)
+
+                if toPrune == []:
+                    await message.channel.send("no members to prune")
+                    return
+
+                await message.channel.send("here is the list of members that would be pruned for not being online on discord for %s days:```%s```type the number of the members (space separated) to ignore, \"yes\" to accept or anything else to cancel"%
+                                           (days, "\n".join("%s. %s"%(i+1,member.display_name) for i, member in enumerate(toPrune)))
+                                           )
+
+            while True:
+                response = await client.wait_for("message")
+                if response.channel == message.channel and response.author == message.author:
+                    break
+                await asyncio.sleep(0.1)
+
+            if response.content.startswith("!prune"): return
+
+            userlist = re.findall(r"\d{1,}", response.content)
+            userlist = [int(i)-1 for i in userlist]
+
+            if response.content == "yes":
+                async with message.channel.typing():
+                    for member in toPrune:
+                        try:
+                            #await member.kick(reason="pruning")
+                            print("kicked %s"%member.display_name)
+                        except discord.errors.Forbidden:
+                            pass
+                    await message.channel.send("done. kicked %s members"%len(toPrune))
+                    return
+            elif userlist != []:
+                userlist.sort()
+                userlist.reverse()
+                for num in userlist:
+                    if num > len(candidates)-1:
+                        continue
+                    toPrune.pop(num)
+                candidates = {member.id: candidates.get(member.id) for member in toPrune}
+                
+                await message.channel.send("removed members from prune list")
+            else:
+                await message.channel.send("canceled.")
+                return
+    async def team(message):
+        class teamSubcommands():
+
+            async def create(message, args):
+                global teams, teamsCategory
+                if not (message.author.guild_permissions.manage_roles and message.author.guild_permissions.manage_channels):
+                    await message.channel.send("you dont have enough permissions to do that!")
+                    return
+
+                if len(args) <= 2:
+                    await message.channel.send("usage: !team create <team name>")
+                    return
+                    
+                if args[-1] == "": args.pop(-1)
+                teamname = " ".join(args[1:])
+
+                if teamname.lower() in teams:
+                    await message.channel.send("that team already exists!")
+                    return
+
+                color = findColor(list(list(i.color.to_rgb()) for i in guild.roles))
+                color = discord.Color.from_rgb(color[0],color[1],color[2])
+                
+                newChannel = await guild.create_text_channel(name="team%s"%teamname.lower().replace(" ",""), category=teamsCategory, reason="creating new team")
+                newRole = await guild.create_role(name=teamname.lower(), hoist=True, mentionable=True, colour=color, reason="creating new team")
+                            
+                teams[teamname.lower()] = {"name": teamname,
+                                   "points": 0,
+                                   "channelId": newChannel.id,
+                                   "roleId": newRole.id
+                                   }
+                save()
+
+                await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+
+            async def remove(message, args):
+                global teams, archiveCategory
+                if not (message.author.guild_permissions.manage_roles and message.author.guild_permissions.manage_channels):
+                    await message.channel.send("you dont have enough permissions to do that!")
+                    return
+
+                if len(args) <= 2:
+                    await message.channel.send("usage: !team remove <team name>")
+                    return
+                
+                if args[-1] == "": args.pop(-1)
+                teamname = " ".join(args[1:])
+                
+                if teamname.lower() not in teams:
+                    await message.channel.send("could not find team \"%s\""%teamname)
+                    return
+
+                try:
+                    await discord.utils.find(lambda e: e.name == teamname.lower().replace(" ",""), guild.emojis).delete(reason="deleting team")
+                except AttributeError:
+                    pass
+                await get_role(teams[teamname.lower()]["roleId"]).delete(reason="deleting team")
+                await client.get_channel(teams[teamname.lower()]["channelId"]).edit(category=archiveCategory, reason="deleting team")
+                teams.pop(teamname.lower())
+                save()
+
+                await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+                
+            async def eslid(message, args):
+                global teams
+                if not (discord.utils.find(lambda r: r.name == args[2].lower(), message.author.roles) != None or message.author.guild_permissions.manage_roles):
+                    await message.channel.send("you dont have enough permissions to do that!")
+                    return
+
+                if len(args) <= 2:
+                    await message.channel.send("usage: !team eslid <id> <team name>")
+                    return
+
+                if args[2].lower() not in teams:
+                    await message.channel.send("could not find team \"%s\""%args[2])
+                    return
+
+                try:
+                    teams[args[2].lower()]["eslId"] = int(args[1])
+                except ValueError:
+                    await message.channel.send("id must be numerical")
+                    return
+                save()    
+
+                await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+
+            async def rename(message, args):
+                global teams
+
+                teamNames = re.findall((r'"(.*?)" "(.*?)"'), message.content)
+
+                if teamNames == []:
+                    await message.channel.send("usage: !team rename \"<new team name>\" \"<old team name>\"\nit's important that the team names are in double quotes")
+                    return
+
+                teamNames = teamNames[0]
+
+                if not (discord.utils.find(lambda r: r.name == teamNames[1].lower(), message.author.roles) != None or message.author.guild_permissions.manage_roles):
+                    await message.channel.send("you dont have enough permissions to do that!")
+                    return
+
+                if teamNames[1].lower() not in teams:
+                    await message.channel.send("could not find team \"%s\""%teamNames[1])
+                    return
+
+                await client.get_channel(teams[teamNames[1].lower()]["channelId"]).edit(name="team%s"%teamNames[0].lower().replace(" ",""), reason="renaming team")
+                await get_role(teams[teamNames[1].lower()]["roleId"]).edit(name=teamNames[0].lower(), reason="renaming team")
+                try:
+                    await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ",""), guild.emojis).edit(name=teamNames[0].lower().replace(" ",""), reason="renaming team")
+                except AttributeError:
+                    pass
+                
+                teams[teamNames[1].lower()]["name"] = teamNames[0]
+                teams[teamNames[0].lower()] = teams[teamNames[1].lower()]
+                teams.pop(teamNames[1].lower())
+                save()
+
+                await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+
+            
+        args = message.content.split(" ")[1:3] + [" ".join(message.content.split(" ")[3:])]
+        method = getattr(teamSubcommands, message.content.split(" ")[1], False)
+        if method:
+            await method(message, args)
+        else:
+            await message.channel.send("usage: !team <eslid/rename/create/remove>")
+            
+
 def get_role(id):
     global guild
     return discord.utils.find(lambda r: r.id == id, guild.roles)
@@ -31,7 +276,7 @@ def save():
 
 async def request(url):
     global http
-    with async_timeout.timeout(10):
+    with async_timeout.timeout(30):
         async with http.get(url) as response:
             return await response.text()
 
@@ -164,7 +409,7 @@ async def updater():
             eslId = metadata.get("eslId")
             if eslId == None:
                 continue
-            
+
             raw = await request("https://play.eslgaming.com/team/%s"%str(eslId))
             processed = re.findall(logoPattern,str(raw))[0]
             if "default.gif" in processed:
@@ -283,259 +528,11 @@ async def on_member_update(before, after):
 
 @client.event
 async def on_message(message):
-    global guild, teamsCategory, teams, archiveCategory
-    
-    if message.content == "!github":
-        await message.channel.send("https://github.com/mateuszdrwal/labourUnit")
-
-    elif message.content == "!ping":
-        await message.channel.send("pong!")
-
-    elif message.content.startswith("!team"):
-        args = message.content.split(" ")[1:3] + [" ".join(message.content.split(" ")[3:])]
-
-        if len(args) <= 2:
-            if args[0] == "eslid":
-                await message.channel.send("usage: !team eslid <id> <team name>")
-            elif args[0] == "name":
-                await message.channel.send("usage: !team rename \"<new team name>\" \"<old team name>\"\nit's important that the team names are in double quotes")
-            elif args[0] == "create":
-                await message.channel.send("usage: !team create <team name>")
-            elif args[0] == "remove":
-                await message.channel.send("usage: !team remove <team name>")
-            else:
-                await message.channel.send("usage: !team <eslid/rename/create/remove> <value> <team name>")
-            return
-
-        response = await message.channel.send("processing...")
-
-        if args[0] == "create":
-            # 1. create channel
-            # 2. create role
-            # 3. set channel permissions for role
-            # 4. add team name, points and channel id to teams dict
-            # suggestion: set role color as far away as possible from other colors
-            
-            if not (message.author.guild_permissions.manage_roles and message.author.guild_permissions.manage_channels):
-                await response.edit(content="you dont have enough permissions to do that!")
-                return
-
-            if args[-1] == "": args.pop(-1)
-            teamname = " ".join(args[1:])
-
-            color = findColor(list(list(i.color.to_rgb()) for i in guild.roles))
-            color = discord.Color.from_rgb(color[0],color[1],color[2])
-            
-            newChannel = await guild.create_text_channel(name="team%s"%teamname.lower().replace(" ",""), category=teamsCategory, reason="creating new team")
-            newRole = await guild.create_role(name=teamname.lower(), hoist=True, mentionable=True, colour=color, reason="creating new team")
+    if message.content.startswith("!"):
+        method = getattr(botCommands, message.content.split(" ")[0][1:], False)
+        if method:
+            await method(message)
                         
-            teams[teamname.lower()] = {"name": teamname,
-                               "points": 0,
-                               "channelId": newChannel.id,
-                               "roleId": newRole.id
-                               }
-            save()
-            await response.delete()
-            await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
-            return
-
-
-        elif args[0] == "remove":
-            
-            if not (message.author.guild_permissions.manage_roles and message.author.guild_permissions.manage_channels):
-                await response.edit(content="you dont have enough permissions to do that!")
-                return
-
-            if args[-1] == "": args.pop(-1)
-            teamname = " ".join(args[1:])
-            
-            if teamname.lower() not in teams:
-                await response.edit(content="could not find team \"%s\""%teamname)
-                return
-
-            try:
-                await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ",""), guild.emojis).delete(reason="deleting team")
-            except AttributeError:
-                pass
-            await get_role(teams[teamname.lower()]["roleId"]).delete(reason="deleting team")
-            await client.get_channel(teams[teamname.lower()]["channelId"]).edit(category=archiveCategory, reason="deleting team")
-            teams.pop(teamname.lower())
-            save()
-            
-            await response.delete()
-            await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
-            return
-
-        if args[2] == "" and args[0] in "eslid rename":
-            await response.edit(content="command \"!team %s\" requires 2 parameters"%args[0])
-            return
-
-        
-        if args[0] == "eslid":
-            
-            if not (discord.utils.find(lambda r: r.name == args[2].lower(), message.author.roles) != None or message.author.guild_permissions.manage_roles):
-                await response.edit(content="you dont have enough permissions to do that!")
-                return
-
-            if args[2].lower() not in teams:
-                await response.edit(content="could not find team \"%s\""%args[2])
-                return
-
-            try:
-                teams[args[2].lower()]["eslId"] = int(args[1])
-            except ValueError:
-                await response.edit(content="id must be numerical")
-                return
-            
-            save()    
-            await response.delete()
-            await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
-            
-            
-        elif args[0] == "rename":
-            teamNames = re.findall((r'"(.*?)" "(.*?)"'), message.content)
-
-            if teamNames == []:
-                await response.edit(content="usage: !team rename \"<new team name>\" \"<old team name>\"\nit's important that the team names are in double quotes")
-                return
-
-            teamNames = teamNames[0]
-
-            if not (discord.utils.find(lambda r: r.name == teamNames[1].lower(), message.author.roles) != None or message.author.guild_permissions.manage_roles):
-                await response.edit(content="you dont have enough permissions to do that!")
-                return
-
-            if teamNames[1].lower() not in teams:
-                await response.edit(content="could not find team \"%s\""%teamNames[1])
-                return
-
-            await client.get_channel(teams[teamNames[1].lower()]["channelId"]).edit(name="team%s"%teamNames[0].lower().replace(" ",""), reason="renaming team")
-            await get_role(team[teamNames[1].lower()]["roleId"]).edit(name=teamNames[0].lower(), reason="renaming team")
-            try:
-                await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ",""), guild.emojis).edit(name=teamNames[0].lower().replace(" ",""), reason="renaming team")
-            except AttributeError:
-                pass
-            
-            teams[teamNames[1].lower()]["name"] = teamNames[0]
-            teams[teamNames[0].lower()] = teams[teamNames[1].lower()]
-            teams.pop(teamNames[1].lower())
-            save()
-
-            await response.delete()
-            await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
-            
-        else:
-            await response.edit(content="unknown parameter to !team \"%s\""%args[0])
-
-    elif message.content.startswith("!addcup"):
-        if not message.author.guild_permissions.manage_roles:
-            await message.channel.send("you dont have enough permissions to do that!")
-            return
-
-        args = message.content.split(" ")
-
-        try:
-            args[1]
-        except:
-            await message.channel.send("usage: !addcup <url>")
-            return
-
-        response = await message.channel.send("processing...")
-
-        soup = BeautifulSoup(await requestLoaded(args[1]))
-        try:
-            data = list(soup.body.find("div", attrs={"class":"c-league-information__schedule__entry o-flag"}).find("div", attrs={"class":"o-flag__body"}))[3].contents[0].split(",")[1]
-        except ValueError:
-            await response.edit(content="invalid url")
-            return
-        
-        timestamp = time.mktime(datetime.datetime.strptime(data, " %d %b %Y %H:%M CET").timetuple())
-        cups.append([int(timestamp),args[1]])
-        save()
-        
-        await response.delete()
-        await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
-
-    elif message.content.startswith("!prune"):
-        if not message.author.guild_permissions.kick_members:
-            await message.channel.send("you dont have enough permissions to do that!")
-            return
-
-        try:
-            days = int(message.content.split(" ")[1])
-        except ValueError:
-            await message.channel.send("number of days must be an integer")
-            return
-        except IndexError:
-            await message.channel.send("usage: !prune <days>")
-            return
-
-        cutoff = time.time() - (60*60*24*days)
-        exceptedRoles = [i for i in teams]+["bot"]
-        candidates = members.copy()
-
-        while True:
-            async with message.channel.typing():
-                toPrune = []
-                for userId, timestamp in candidates.items():
-                    user = client.get_user(userId)
-                    if user not in guild.members:
-                        members.pop(userId)
-                        canndidates.pop(userId)
-                        save()
-                        continue
-                    member = guild.get_member(userId)
-                    if timestamp < cutoff:
-                        for role in member.roles:
-                            if role.name in exceptedRoles:
-                                break
-                        else:
-                            toPrune.append(member)
-
-                if toPrune == []:
-                    await message.channel.send("no members to prune")
-                    return
-
-                await message.channel.send("here is the list of members that would be pruned for not being online on discord for %s days:```%s```type the number of the members (space separated) to ignore, \"yes\" to accept or anything else to cancel"%
-                                           (days, "\n".join("%s. %s"%(i+1,member.display_name) for i, member in enumerate(toPrune)))
-                                           )
-
-            while True:
-                response = await client.wait_for("message")
-                if response.channel == message.channel and response.author == message.author:
-                    break
-                await asyncio.sleep(0.1)
-
-            if response.content.startswith("!prune"): return
-
-            userlist = re.findall(r"\d{1,}", response.content)
-            userlist = [int(i)-1 for i in userlist]
-
-            if response.content == "yes":
-                async with message.channel.typing():
-                    for member in toPrune:
-                        try:
-                            await member.kick(reason="pruning")
-                            print("kicked %s"%member.display_name)
-                        except discord.errors.Forbidden:
-                            pass
-                    await message.channel.send("done. kicked %s members"%len(toPrune))
-                    return
-            elif userlist != []:
-                userlist.sort()
-                userlist.reverse()
-                for num in userlist:
-                    if num > len(candidates)-1:
-                        continue
-                    toPrune.pop(num)
-                candidates = {member.id: candidates.get(member.id) for member in toPrune}
-                
-                await message.channel.send("removed members from prune list")
-            else:
-                await message.channel.send("canceled.")
-                return
-            
-                
             
 client.loop.create_task(updater())
 client.loop.create_task(cupTask())
