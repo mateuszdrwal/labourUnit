@@ -1,6 +1,8 @@
 import discord,asyncio,threading,urllib3,re,warnings,time,sys,traceback,aiohttp,async_timeout,datetime,random,os
+from selenium.webdriver.chrome.options import Options
 from colorsys import rgb_to_hsv, hsv_to_rgb
 from subprocess import Popen, PIPE
+from selenium import webdriver
 from bs4 import BeautifulSoup
 from math import sqrt
 from data import *
@@ -12,6 +14,8 @@ devnull = open(os.devnull, "w")
 client = discord.Client()
 logoPattern = re.compile(r'src="(https://cdn-eslgaming.akamaized.net/play/eslgfx/gfx/logos/teams/.*?)" id="team_logo_overlay_image"')
 warnings.filterwarnings("ignore")
+chromeOptions = Options()
+chromeOptions.add_argument("--headless")
 
 class botCommands:
     async def ping(message):
@@ -51,7 +55,7 @@ class botCommands:
         await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
 
     async def prune(message):
-        global guild, members, debug
+        global guild, members
         if not message.author.guild_permissions.kick_members:
             await message.channel.send("you dont have enough permissions to do that!")
             return
@@ -74,7 +78,6 @@ class botCommands:
                 toPrune = []
                 for userId, timestamp in candidates.items():
                     user = client.get_user(userId)
-                    debug = guild.members
                     if user not in guild.members:
                         members.pop(userId)
                         canndidates.pop(userId)
@@ -111,7 +114,7 @@ class botCommands:
                 async with message.channel.typing():
                     for member in toPrune:
                         try:
-                            #await member.kick(reason="pruning")
+                            await member.kick(reason="pruning")
                             print("kicked %s"%member.display_name)
                         except discord.errors.Forbidden:
                             pass
@@ -283,8 +286,12 @@ async def request(url):
 async def requestLoaded(url):
     global client
     def blocking(url):
-        p = Popen(["chromium-browser","--headless","--dump-dom",url], stdout = PIPE)
-        return p.communicate()[0]
+        driver = webdriver.Chrome(chrome_options=chromeOptions)
+        driver.get(url)
+        time.sleep(5)
+        html = driver.page_source
+        driver.close()
+        return html
     return await client.loop.run_in_executor(None, blocking, url)
 
 def findColor(colors):
@@ -439,7 +446,7 @@ async def updater():
         await asyncio.sleep(1200)
 
 async def cupTask():
-    global debug
+    global cupChannel
 
     await client.wait_until_ready()
     await asyncio.sleep(5)
@@ -450,35 +457,106 @@ async def cupTask():
             
         cups.sort()
         cup = cups[0]
-        if cup[0] < time.time():
+        if cup[0]+21600 < time.time():
             cups.pop(0)
+            save()
             continue
 
-        await asyncio.sleep(cup[0]-time.time()-930)
+        waitTime = cup[0]-time.time()-930
+        if waitTime > 0:
+            await asyncio.sleep(waitTime)
 
-        raw = await requestLoaded(cup[1]+"/contestants/")                
-        soup = BeautifulSoup(raw)
-        elements = soup.findAll("div", attrs = {"class":"participant"})
-        for team, metadata in teams.items():
-            for element in elements:
-                if metadata["eslId"] in str(element).lower() and "Not checked in" in str(element):
-                    mention = get_role(metadata["roleId"]).mention
-                    await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have 15 minutes left!"%mention)
-                    print("%s has not checked in, 15min left"%team)
+            raw = await requestLoaded(cup[1]+"/contestants/")                
+            soup = BeautifulSoup(raw)
+            elements = soup.findAll("div", attrs = {"class":"participant"})
+            for team, metadata in teams.items():
+                for element in elements:
+                    if metadata["eslId"] in str(element).lower() and "Not checked in" in str(element):
+                        mention = get_role(metadata["roleId"]).mention
+                        await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have 15 minutes left!"%mention)
+                        print("%s has not checked in, 15min left"%team)
 
-        await asyncio.sleep(cup[0]-time.time()-200)
+        waitTime = cup[0]-time.time()-200
+        if waitTime > 0:
+            await asyncio.sleep(waitTime)
 
-        raw = await requestLoaded(cup[1]+"/contestants/")                
-        soup = BeautifulSoup(raw)
-        elements = soup.findAll("div", attrs = {"class":"participant"})
-        for team, metadata in teams.items():
-            for element in elements:
-                if metadata["eslId"] in str(element).lower() and "Not checked in" in str(element):
-                    mention = get_role(metadata["roleId"]).mention
-                    await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have only 3 minutes left! In the case that you wont make it, contact @ESL in the #eu_vr_challenger_league on the echo games server immediately. They should be able to help until the brackets are generated. Hurry!"%mention)
-                    print("%s has not checked in, 3min left"%team)
+            raw = await requestLoaded(cup[1]+"/contestants/")                
+            soup = BeautifulSoup(raw)
+            elements = soup.findAll("div", attrs = {"class":"participant"})
+            for team, metadata in teams.items():
+                for element in elements:
+                    if metadata["eslId"] in str(element).lower() and "Not checked in" in str(element):
+                        mention = get_role(metadata["roleId"]).mention
+                        await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have only 3 minutes left! In the case that you wont make it, contact @ESL in the #eu_vr_challenger_league on the echo games server immediately. They should be able to help until the brackets are generated. Hurry!"%mention)
+                        print("%s has not checked in, 3min left"%team)
 
-        await asyncio.sleep(180)
+        waitTime = cup[0]-time.time()
+        if waitTime > 0:
+            await asyncio.sleep(waitTime)
+
+            raw = await requestLoaded(cup[1]+"/contestants/#!?type=seed&order=asc")
+            teamList = re.findall(r"team/\d*\">((?:\w*? ?-?_?)*)</a>", raw)
+                
+            await cupChannel.send("The weekly cup has begun! Good luck to everyone participating!")
+            await cupChannel.send("Here are the seeds participating today:```%s```"%"\n".join(["%s. %s"%(i+1, name) for i, name in enumerate(teamList)]))
+
+        try:
+            open("tempFile", "r").close()
+        except FileNotFoundError:
+            open("tempFile","w").close()
+
+        while True:
+            rawBracket = await requestLoaded(cup[1]+"/rankings/")
+            soup = BeautifulSoup(rawBracket)
+            pairings = soup.find_all("div", attrs = {"class":"pairing"})
+
+            for pairing in pairings:
+                f = open("tempFile","r")
+                pks = f.readlines()
+                f.close()
+                if pairing.attrs.get("winner") == None or pairing.attrs["pk"]+"\n" in pks:
+                    continue
+
+                link = "https://play.eslgaming.com" + pairing.find("div", attrs = {"class":"inner-status"}).contents[0].attrs["href"]
+                results = await request(link)
+
+                teams = re.findall(".gif\">.*?((?:\w*? ?-?_?)*)</a>", results)
+                points = re.findall(r"<b>([0,1,2])</b>", results)
+                try:
+                    roundName = pairing.parent.parent.contents[1].contents[0].replace("\n","")+" "
+                except TypeError:
+                    roundName = ""
+
+                if int(points[0]) + int(points[1]) == 1:
+                    f = open("tempFile","a")
+                    f.write(pairing.attrs["pk"]+"\n")
+                    f.close()
+                    continue
+                
+                await cupChannel.send("%smatch completed:```%s vs %s\n%s%s    %s```"%(roundName,
+                                                                                teams[0],
+                                                                                teams[1],
+                                                                                (len(teams[0])-1)*" ",
+                                                                                points[0],
+                                                                                points[1]))
+
+                f = open("tempFile","a")
+                f.write(pairing.attrs["pk"]+"\n")
+                f.close()
+
+            f = open("tempFile","r")
+            pks = f.readlines()
+            f.close()
+            for pairing in pairings:
+                if pairing.attrs["pk"]+"\n" not in pks:
+                    break
+            else:
+                break
+
+        Popen(["rm","tempFile"])
+        await cupChannel.send("The cup has now ended! Good job everyone!")
+        cups.pop(0)
+        save()
 
 if not debug:
     @client.event
@@ -486,10 +564,10 @@ if not debug:
         global errorChannel, err, mateuszdrwal
         err = sys.exc_info()
         await errorChannel.send("%s\n```%s\n\n%s```"%(mateuszdrwal.mention,"".join(traceback.format_tb(err[2])),err[1].args[0]))
-
+        
 @client.event
 async def on_ready():
-    global raw, guild, captains, teamsCategory, archiveCategory, generalChannel, errorChannel, mateuszdrwal, http
+    global raw, guild, captains, teamsCategory, archiveCategory, generalChannel, errorChannel, mateuszdrwal, http, cupChannel
     print(client.user.name)
     print(client.user.id)
         
@@ -498,10 +576,11 @@ async def on_ready():
     archiveCategory = client.get_channel(382992652871925771)
     generalChannel = client.get_channel(374854809997803532)
     errorChannel = client.get_channel(394112817583882251)
+    cupChannel = client.get_channel(402955959112040458)
     mateuszdrwal = client.get_user(140504440930041856)
 
     http = aiohttp.ClientSession()
-    
+   
     captains = get_role(386988129816543235)
     
     await client.change_presence(game=discord.Game(name='Echo Combat',type=1))
