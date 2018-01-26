@@ -1,8 +1,7 @@
-import discord,asyncio,threading,urllib3,re,warnings,time,sys,traceback,aiohttp,async_timeout,datetime,random,os
+import discord,asyncio,threading,urllib3,re,warnings,time,sys,traceback,aiohttp,async_timeout,datetime,random,os,json
 from selenium.webdriver.chrome.options import Options
 from colorsys import rgb_to_hsv, hsv_to_rgb
 from subprocess import Popen, PIPE
-from selenium import webdriver
 from bs4 import BeautifulSoup
 from math import sqrt
 from data import *
@@ -23,36 +22,6 @@ class botCommands:
 
     async def github(message):
         await message.channel.send("https://github.com/mateuszdrwal/labourUnit")
-
-    async def addcup(message):
-        global cups
-        if not message.author.guild_permissions.manage_roles:
-            await message.channel.send("you dont have enough permissions to do that!")
-            return
-
-        args = message.content.split(" ")
-
-        try:
-            args[1]
-        except:
-            await message.channel.send("usage: !addcup <url>")
-            return
-
-        response = await message.channel.send("processing...")
-
-        soup = BeautifulSoup(await requestLoaded(args[1]))
-        try:
-            data = list(soup.body.find("div", attrs={"class":"c-league-information__schedule__entry o-flag"}).find("div", attrs={"class":"o-flag__body"}))[3].contents[0].split(",")[1]
-        except ValueError:
-            await response.edit(content="invalid url")
-            return
-        
-        timestamp = time.mktime(datetime.datetime.strptime(data, " %d %b %Y %H:%M CET").timetuple())
-        cups.append([int(timestamp),args[1]])
-        save()
-        
-        await response.delete()
-        await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
 
     async def prune(message):
         global guild, members
@@ -133,6 +102,7 @@ class botCommands:
             else:
                 await message.channel.send("canceled.")
                 return
+            
     async def team(message):
         class teamSubcommands():
 
@@ -241,7 +211,7 @@ class botCommands:
                 await client.get_channel(teams[teamNames[1].lower()]["channelId"]).edit(name="team%s"%teamNames[0].lower().replace(" ",""), reason="renaming team")
                 await get_role(teams[teamNames[1].lower()]["roleId"]).edit(name=teamNames[0].lower(), reason="renaming team")
                 try:
-                    await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ",""), guild.emojis).edit(name=teamNames[0].lower().replace(" ",""), reason="renaming team")
+                    await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ","").replace("-",""), guild.emojis).edit(name=teamNames[0].lower().replace(" ","").replace("-",""), reason="renaming team")
                 except AttributeError:
                     pass
                 
@@ -277,22 +247,15 @@ def save():
     f.write("\nmembers = "+str(members))
     f.close()
 
+async def eslApi(path):
+    raw = await request("https://api.eslgaming.com"+path)
+    return json.loads(raw)
+
 async def request(url):
     global http
     with async_timeout.timeout(30):
         async with http.get(url) as response:
             return await response.text()
-
-async def requestLoaded(url):
-    global client
-    def blocking(url):
-        driver = webdriver.Chrome(chrome_options=chromeOptions)
-        driver.get(url)
-        time.sleep(5)
-        html = driver.page_source
-        driver.close()
-        return html
-    return await client.loop.run_in_executor(None, blocking, url)
 
 def findColor(colors):
     try:
@@ -397,7 +360,7 @@ async def updater():
             teams[team]["points"] = int(entry.contents[3].contents[0])
 
         #update role and channel order
-        roleoffset = 2
+        roleoffset = 3
         rolecount = len(guild.roles)-1
         teamlist = []
         tmp = teams.copy().items()
@@ -412,7 +375,7 @@ async def updater():
         #update emoji's
         tmp = teams.copy().items()
         for team, metadata in tmp:
-            team = team.replace(" ","")
+            team = team.replace(" ","").replace("-","")
             eslId = metadata.get("eslId")
             if eslId == None:
                 continue
@@ -452,53 +415,54 @@ async def cupTask():
     await asyncio.sleep(5)
 
     while True:
+
+        cups = []
+        raw = await eslApi("/play/v1/leagues?types=&states=inProgress,upcoming&skill_levels=&limit.total=8&path=%2Fplay%2Fechoarena%2Feurope%2F&portals=&tags=vrclechoarena-eu-portal&includeHidden=0")
+        for cup in raw.values():
+            cups.append([datetime.datetime.strptime(cup["timeline"]["inProgress"]["begin"].replace(":",""), "%Y-%m-%dT%H%M%S%z").timestamp(),
+                         cup["id"]
+                         ])
+        
         if len(cups) == 0:
-            await asyncio.sleep(60)
+            await asyncio.sleep(3600)
             
         cups.sort()
         cup = cups[0]
-        if cup[0]+21600 < time.time():
-            cups.pop(0)
-            save()
-            continue
 
-        waitTime = cup[0]-time.time()-930
+        waitTime = cup[0]-time.time()-900
         if waitTime > 0:
             await asyncio.sleep(waitTime)
 
-            raw = await requestLoaded(cup[1]+"/contestants/")                
-            soup = BeautifulSoup(raw)
-            elements = soup.findAll("div", attrs = {"class":"participant"})
-            for team, metadata in teams.items():
-                for element in elements:
-                    if metadata["eslId"] in str(element).lower() and "Not checked in" in str(element):
-                        mention = get_role(metadata["roleId"]).mention
-                        await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have 15 minutes left!"%mention)
-                        print("%s has not checked in, 15min left"%team)
+            raw = await eslApi("/play/v1/leagues/%s/contestants"%cup[1])
+            for team in raw:
+                match = discord.utils.find(lambda t: t["eslId"] == team["id"],teams.values())
+                if match == None or team["status"] != "signedUp": continue
+                mention = get_role(match["roleId"]).mention
+                await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have 15 minutes left!"%mention)
+                print("%s has not checked in, 15min left"%team)
 
-        waitTime = cup[0]-time.time()-200
+        waitTime = cup[0]-time.time()-180
         if waitTime > 0:
             await asyncio.sleep(waitTime)
 
-            raw = await requestLoaded(cup[1]+"/contestants/")                
-            soup = BeautifulSoup(raw)
-            elements = soup.findAll("div", attrs = {"class":"participant"})
-            for team, metadata in teams.items():
-                for element in elements:
-                    if metadata["eslId"] in str(element).lower() and "Not checked in" in str(element):
-                        mention = get_role(metadata["roleId"]).mention
-                        await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have only 3 minutes left! In the case that you wont make it, contact @ESL in the #eu_vr_challenger_league on the echo games server immediately. They should be able to help until the brackets are generated. Hurry!"%mention)
-                        print("%s has not checked in, 3min left"%team)
+            raw = await eslApi("/play/v1/leagues/%s/contestants"%cup[1])
+            for team in raw:
+                match = discord.utils.find(lambda t: t["eslId"] == team["id"],teams.values())
+                if match == None or team["status"] != "signedUp": continue
+                mention = get_role(match["roleId"]).mention
+                await client.get_channel(metadata["channelId"]).send("%s Don't forget to check in! You have only 3 minutes left! In the case that you wont make it, contact @ESL in the #eu_vr_challenger_league on the echo games server immediately. They should be able to help until the brackets are generated. Hurry!"%mention)
+                print("%s has not checked in, 3min left"%team["name"])
 
         waitTime = cup[0]-time.time()
         if waitTime > 0:
             await asyncio.sleep(waitTime)
 
-            raw = await requestLoaded(cup[1]+"/contestants/#!?type=seed&order=asc")
-            teamList = re.findall(r"team/\d*\">((?:\w*? ?-?_?)*)</a>", raw)
-                
+            raw = await eslApi("/play/v1/leagues/%s/contestants"%cup[1])
+            teamList = [[team["seed"], team["name"]] for team in raw if team["status"] == "checkedIn"]
+            teamList.sort()
+                            
             await cupChannel.send("The weekly cup has begun! Good luck to everyone participating!")
-            await cupChannel.send("Here are the seeds participating today:```%s```"%"\n".join(["%s. %s"%(i+1, name) for i, name in enumerate(teamList)]))
+            await cupChannel.send("Here are the seeds participating today:```%s```"%"\n".join(["%s. %s"%(i+1, name[1]) for i, name in enumerate(teamList)]))
 
         try:
             open("tempFile", "r").close()
@@ -506,52 +470,49 @@ async def cupTask():
             open("tempFile","w").close()
 
         while True:
-            rawBracket = await requestLoaded(cup[1]+"/rankings/")
-            soup = BeautifulSoup(rawBracket)
-            pairings = soup.find_all("div", attrs = {"class":"pairing"})
+            pairings = await eslApi("/play/v1/leagues/%s/results"%cup[1])
 
             for pairing in pairings:
                 f = open("tempFile","r")
-                pks = f.readlines()
+                ids = f.readlines()
                 f.close()
-                if pairing.attrs.get("winner") == None or pairing.attrs["pk"]+"\n" in pks:
+                if pairing["state"] != "closed" or str(pairing["id"])+"\n" in ids:
                     continue
 
-                link = "https://play.eslgaming.com" + pairing.find("div", attrs = {"class":"inner-status"}).contents[0].attrs["href"]
-                results = await request(link)
-
-                teams = re.findall(".gif\">.*?((?:\w*? ?-?_?)*)</a>", results)
-                points = re.findall(r"<b>([0,1,2])</b>", results)
-                try:
-                    roundName = pairing.parent.parent.contents[1].contents[0].replace("\n","")+" "
-                except TypeError:
-                    roundName = ""
+                points = [pairing["participants"][0]["points"][0],pairing["participants"][1]["points"][0]]
 
                 if int(points[0]) + int(points[1]) == 1:
                     f = open("tempFile","a")
-                    f.write(pairing.attrs["pk"]+"\n")
+                    f.write(str(pairing["id"])+"\n")
                     f.close()
                     continue
+
+                teams2 = [(await eslApi("/play/v1/teams/%s"%pairing["participants"][0]["id"]))["name"],
+                          (await eslApi("/play/v1/teams/%s"%pairing["participants"][1]["id"]))["name"]
+                          ]
                 
-                await cupChannel.send("%smatch completed:```%s vs %s\n%s%s    %s```"%(roundName,
-                                                                                teams[0],
-                                                                                teams[1],
-                                                                                (len(teams[0])-1)*" ",
+                roundName = "round %s match of bracket %s completed:"%(pairing["round"]+1,pairing["bracket"]+1)
+                
+                await cupChannel.send("%s```%s vs %s\n%s%s    %s```"%(roundName,
+                                                                                teams2[0],
+                                                                                teams2[1],
+                                                                                (len(teams2[0])-1)*" ",
                                                                                 points[0],
                                                                                 points[1]))
 
                 f = open("tempFile","a")
-                f.write(pairing.attrs["pk"]+"\n")
+                f.write(str(pairing["id"])+"\n")
                 f.close()
 
             f = open("tempFile","r")
-            pks = f.readlines()
+            ids = f.readlines()
             f.close()
             for pairing in pairings:
-                if pairing.attrs["pk"]+"\n" not in pks:
+                if str(pairing["id"])+"\n" not in ids:
                     break
             else:
-                break
+                if time.time() - cup[0] > 3600:
+                    break
 
         Popen(["rm","tempFile"])
         await cupChannel.send("The cup has now ended! Good job everyone!")
@@ -588,16 +549,7 @@ async def on_ready():
 @client.event
 async def on_member_join(member):
     global guild, generalChannel
-    await generalChannel.send("Welcome %s to the champions server!\nAre you searching for a team?"%member.mention)
-    while True:
-        response = await client.wait_for("message")
-        if response.channel == generalChannel and response.author == member:
-            break
-    for word in ["yes","yeah","yh","yep"]:
-        if word in response.content.lower():
-            await generalChannel.send("Great! I'll give you the appropriate roles then. Good luck!")
-            await member.edit(roles=member.roles+[get_role(390421232199401475)])
-            return
+    await generalChannel.send(":wave:")
 
 @client.event
 async def on_member_update(before, after):
