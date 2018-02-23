@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 import discord,asyncio,threading,re,warnings,time,sys,traceback,aiohttp,async_timeout,datetime,random,os,json,io
 from PIL import Image, ImageFont, ImageDraw
@@ -21,6 +22,21 @@ class botCommands:
 
     async def github(message):
         await message.channel.send("https://github.com/mateuszdrwal/labourUnit")
+
+    async def lastseen(message):
+        username = message.content.split()[1].lower()
+        member = discord.utils.find(lambda n: username in n.name.lower(), guild.members)
+
+        if not member:
+            await message.channel.send("member not found")
+            return
+
+        if member.status != discord.Status.offline:
+            await message.channel.send("member is currently online")
+            return
+
+        laston = members.get(member.id)
+        await message.channel.send(datetime.datetime.fromtimestamp(laston).strftime("{} was last online %A %b %d at %H:%M CET".format(member.display_name)))
 
     async def prune(message):
         global guild, members
