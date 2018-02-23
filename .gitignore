@@ -3,3 +3,5 @@ emojis
 __pycache__
 *.pyc
 tempFile
+*.ttf
+match.png
