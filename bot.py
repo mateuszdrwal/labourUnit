@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 import discord,asyncio,threading,re,warnings,time,sys,traceback,aiohttp,async_timeout,datetime,random,os,json,io
 from PIL import Image, ImageFont, ImageDraw
@@ -176,7 +175,7 @@ class botCommands:
                 except AttributeError:
                     pass
                 await get_role(teams[teamname.lower()]["roleId"]).delete(reason="deleting team")
-                await client.get_channel(teams[teamname.lower()]["channelId"]).edit(category=archiveCategory, reason="deleting team")
+                await client.get_channel(teams[teamname.lower()]["channelId"]).edit(category=archiveCategory, sync_permissions=True,reason="deleting team")
                 teams.pop(teamname.lower())
                 save()
 
@@ -376,14 +375,15 @@ async def updater():
                     
                     break
             else:
-                proposedNick = member.nick.split(" | ")[0] if member.nick != None else None
-                if member.nick == proposedNick:
-                        continue
-                try:
-                    await member.edit(nick=proposedNick, reason="updating user nickname")
-                    print("updated %s's nickname"%member.name)
-                except discord.errors.Forbidden:
-                    pass
+                pass
+                # proposedNick = member.nick.split(" | ")[0] if member.nick != None else None
+                # if member.nick == proposedNick:
+                #         continue
+                # try:
+                #     await member.edit(nick=proposedNick, reason="updating user nickname")
+                #     print("updated %s's nickname"%member.name)
+                # except discord.errors.Forbidden:
+                #     pass
 
         #update standings
         raw = await request("https://toolbox.tet.io/go4/vrclechoarena_eu/season-1/")
@@ -420,7 +420,12 @@ async def updater():
                 continue
 
             raw = await eslApi("/play/v1/teams/%s"%str(eslId))
-            processed = raw["logo"]
+
+            try:
+                processed = raw["logo"]
+            except KeyError:
+                continue
+                
             if "default.gif" in processed:
                 continue
             
@@ -466,6 +471,7 @@ async def cupTask():
         
         if len(cups) == 0:
             await asyncio.sleep(3600)
+            continue
             
         cups.sort()
         cup = cups[0]
@@ -477,7 +483,7 @@ async def cupTask():
 
             raw = await eslApi("/play/v1/leagues/%s/contestants"%cup[1])
             for team in raw:
-                match = discord.utils.find(lambda t: t["eslId"] == team["id"],teams.values())
+                match = discord.utils.find(lambda t: t.get("eslId") == team["id"],teams.values())
                 if match == None or team["status"] != "signedUp": continue
                 mention = get_role(match["roleId"]).mention
                 await client.get_channel(match["channelId"]).send("%s Don't forget to check in! You have 15 minutes left!"%mention)
@@ -490,145 +496,12 @@ async def cupTask():
 
             raw = await eslApi("/play/v1/leagues/%s/contestants"%cup[1])
             for team in raw:
-                match = discord.utils.find(lambda t: t["eslId"] == team["id"],teams.values())
+                match = discord.utils.find(lambda t: t.get("eslId") == team["id"],teams.values())
                 if match == None or team["status"] != "signedUp": continue
                 mention = get_role(match["roleId"]).mention
                 await client.get_channel(match["channelId"]).send("%s Don't forget to check in! You have only 3 minutes left! In the case that you wont make it, contact @ESL in the #eu_vr_challenger_league on the echo games server immediately. They should be able to help until the brackets are generated. Hurry!"%mention)
                 print("%s has not checked in, 3min left"%team["name"])
 
-        waitTime = cup[0]-time.time()
-        if waitTime > 0:
-            print("waiting %s"%waitTime)
-            await asyncio.sleep(waitTime)
-
-            raw = await eslApi("/play/v1/leagues/%s/contestants"%cup[1])
-            teamList = [[team["seed"], team["name"]] for team in raw if team["status"] == "checkedIn"]
-            teamList.sort()
-                            
-            await cupChannel.send("The weekly cup has begun! Good luck to everyone participating!")
-            await cupChannel.send("Here are the seeds participating today:```%s```"%"\n".join(["%s. %s"%(i+1, name[1]) for i, name in enumerate(teamList)]))
-
-        raw = await eslApi("/play/v1/leagues/%s/contestants"%cup[1])
-        bold = ImageFont.truetype("bold.ttf", 50)
-        longest = 0
-        for team in raw:
-            length = bold.getsize(team["name"])[0]
-            if length > longest: longest = length
-
-        try:
-            open("tempFile", "r").close()
-        except FileNotFoundError:
-            open("tempFile","w").close()
-
-        allcups = []
-
-        while True:
-            await asyncio.sleep(60)
-            cups2 = await eslApi("/play/v1/leagues?types=&states=inProgress&skill_levels=&limit.total=8&path=%2Fplay%2Fechoarena%2Feurope%2F&portals=&tags=vrclechoarena-eu-portal&includeHidden=0")
-
-            pairings = []
-            for cup2 in cups2.values():
-                if "cup" not in cup2["name"]["full"].lower():
-                    continue
-                if cup2["id"] not in allcups: allcups.append(cup2["id"])
-                pairings += await eslApi("/play/v1/leagues/%s/matches"%cup2["id"])
-
-            pairings += await eslApi("/play/v1/leagues/%s/matches"%cup[1])
-
-            for pairing in pairings:
-                f = open("tempFile","r")
-                ids = f.readlines()
-                f.close()
-
-                ended = pairing["calculatedAt"]
-                teams2 = [pairing["contestants"][0]["team"]["name"],pairing["contestants"][1]["team"]["name"]]
-                points = [pairing["result"]["score"].get(pairing["contestants"][0]["team"]["id"]),pairing["result"]["score"].get(pairing["contestants"][1]["team"]["id"])]
-
-                if pairing["status"] != "closed" or str(pairing["id"])+"\n" in ids:
-                    continue
-
-                if points[0] == None or points[1] == None or ended == None:
-                    f = open("tempFile","a")
-                    f.write(str(pairing["id"])+"\n")
-                    f.close()
-                    continue
-
-                #draw image
-                logo1 = Image.open(io.BytesIO(await requestImage(pairing["contestants"][0]["team"]["logo"])))
-                logo2 = Image.open(io.BytesIO(await requestImage(pairing["contestants"][1]["team"]["logo"])))
-                midtext = "VS"
-                logospacing = 20
-                textspacing = 20
-                font = ImageFont.truetype("font.ttf", 50)
-                bold = ImageFont.truetype("bold.ttf", 50)
-                max = font.getsize("Tq")[1]
-                y = 90-int(max/2)
-                color = (128,128,128,255)
-
-                team1font = font
-                team2font = font
-
-                if points[0] > points[1]:
-                    team1font = bold
-                elif points[0] < points[1]:
-                    team2font = bold
-    
-                team1size = team1font.getsize(teams2[0])[0]
-                team2size = team2font.getsize(teams2[1])[0]
-                
-                midsize = font.getsize(midtext)[0]
-
-                size = longest
-                team1extra = (longest - team1size)/2
-                team2extra = (longest - team2size)/2
-
-                length = 180*2+logospacing*2 + textspacing*2 + size*2 + midsize
-                img = Image.new("RGBA",(length, 180), color=(255,255,255,0))
-                draw = ImageDraw.Draw(img)
-                img.paste(logo1, (0,0))
-                img.paste(logo2, (length-180,0))
-                draw.text((180+logospacing+team1extra, y), teams2[0], font=team1font, fill=color)
-                draw.text((180+logospacing+size+textspacing, y), midtext, font=font, fill=color)
-                draw.text((180+logospacing+size+midsize+textspacing*2+team2extra, y), teams2[1], font=team2font, fill=color)
-
-                draw.text((180+logospacing+size-font.getsize(str(points[0]))[0],y+5+max), str(points[0]), font=team1font, fill=color)
-                draw.text((180+logospacing+size+textspacing*2+midsize,y+5+max), str(points[1]), font=team2font, fill=color)
-
-                img.save("match.png")
-
-                while True:
-                    try:
-                        await cupChannel.send(file=discord.File("match.png"))
-                        break
-                    except ValueError:
-                        os.remove("match.png")
-                        img.save("match.png")
-
-                f = open("tempFile","a")
-                f.write(str(pairing["id"])+"\n")
-                f.close()
-
-            f = open("tempFile","r")
-            ids = f.readlines()
-            f.close()
-            for pairing in pairings:
-                if str(pairing["id"])+"\n" not in ids:
-                    break
-            else:
-                if time.time() - cup[0] > 7200 and await eslApi("/play/v1/leagues?types=&states=inProgress&skill_levels=&limit.total=8&path=%2Fplay%2Fechoarena%2Feurope%2F&portals=&tags=vrclechoarena-eu-portal&includeHidden=0") == {}:
-                    break
-
-        Popen(["rm","tempFile"])
-        await cupChannel.send("The cup has now ended! Good job everyone!")
-        await cupChannel.send("Here are the final rankings of todays cup:")
-
-        for cup2 in allcups:
-            ranking = await eslApi("/play/v1/leagues/%s/ranking"%cup2)
-            teams2 = [(team["position"], team["team"]["name"]) for team in ranking["ranking"]]
-            teams2.sort()
-            await cupChannel.send("```%s```"%"\n".join(["%s. %s"%(team[0],team[1]) for team in teams2]))
-        
-        print("cup done")
         await asyncio.sleep(60)
 
 if not debug:
@@ -649,18 +522,20 @@ async def on_ready():
     archiveCategory = client.get_channel(382992652871925771)
     generalChannel = client.get_channel(374854809997803532)
     errorChannel = client.get_channel(394112817583882251)
-    cupChannel = client.get_channel(402955959112040458)
+    cupChannel = client.get_channel(402955959112040458)#394112817583882251)
     mateuszdrwal = client.get_user(140504440930041856)
 
     http = aiohttp.ClientSession()
    
     captains = get_role(386988129816543235)
     
-    await client.change_presence(game=discord.Game(name='Echo Combat',type=1))
+    await client.change_presence(activity=discord.Activity(name='Echo Combat',type=discord.ActivityType.streaming))
 
 @client.event
 async def on_member_join(member):
     global guild, generalChannel
+    if member.guild != guild:
+        return
     await generalChannel.send("welcome :wave:, check out <#415251238301466625> to quickly get started!")
 
 @client.event
@@ -675,9 +550,17 @@ async def on_message(message):
         method = getattr(botCommands, message.content.split(" ")[0][1:], False)
         if method:
             await method(message)
-                        
-            
-client.loop.create_task(updater())
-client.loop.create_task(cupTask())
+
+
+async def errorCatcher(task):
+    global errorChannel, mateuszdrwal
+    try:
+        await task
+    except Exception as e:
+        err = sys.exc_info()
+        await errorChannel.send("%s\n```%s\n\n%s```"%(mateuszdrwal.mention,"".join(traceback.format_tb(err[2])),err[1].args[0]))
+
+client.loop.create_task(errorCatcher(updater()))
+client.loop.create_task(errorCatcher(cupTask()))
 
 client.run(open("token","r").read())
