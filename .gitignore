@@ -5,3 +5,4 @@ __pycache__
 tempFile
 *.ttf
 match.png
+data.db

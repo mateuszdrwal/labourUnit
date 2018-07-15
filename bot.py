@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import discord,asyncio,threading,re,warnings,time,sys,traceback,aiohttp,async_timeout,datetime,random,os,json,io
+import discord,asyncio,threading,re,warnings,time,sys,traceback,aiohttp,async_timeout,datetime,random,os,json,io,sqlite3
 from PIL import Image, ImageFont, ImageDraw
 from colorsys import rgb_to_hsv, hsv_to_rgb
 from subprocess import Popen, PIPE
@@ -14,6 +14,11 @@ devnull = open(os.devnull, "w")
 client = discord.Client()
 logoPattern = re.compile(r'src="(https://cdn-eslgaming.akamaized.net/play/eslgfx/gfx/logos/teams/.*?)" id="team_logo_overlay_image"')
 warnings.filterwarnings("ignore")
+
+conn = sqlite3.connect("data.db")
+c = conn.cursor()
+
+atozfilter = regex = re.compile('[^a-zA-Z]')
 
 class botCommands:
     async def ping(message):
@@ -240,10 +245,108 @@ class botCommands:
             
         args = message.content.split(" ")[1:3] + [" ".join(message.content.split(" ")[3:])]
         method = getattr(teamSubcommands, message.content.split(" ")[1], False)
+
+        if message.author.id == 338649491894829057:
+            await message.channel.send("Yes mistress")
+
         if method:
             await method(message, args)
         else:
             await message.channel.send("usage: !team <eslid/rename/create/remove>")
+
+    async def duck(message):
+        await message.channel.send("<@176810272512671744>")
+
+    async def newsletter(message):
+        class newsSubcommands():
+
+            async def join(message):
+                c.execute("INSERT INTO newsletter VALUES (:id)", {"id": message.author.id})
+                conn.commit()
+                await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+
+            async def leave(message):
+                c.execute("DELETE FROM newsletter WHERE users = :id", {"id": message.author.id})
+                conn.commit()
+                await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+
+            async def send(message):
+                if not message.author.guild_permissions.manage_roles:
+                    await message.channel.send("you dont have enough permissions to do that!")
+                    return
+
+                c.execute("SELECT * FROM newsletter")
+                msg = message.content.split("!newsletter send ")
+                if len(msg) == 1:
+                    return
+                else:
+                    msg = msg[1]
+
+                for id in c.fetchall():
+                    user = client.get_user(int(id[0]))
+                    if user == None:
+                        continue
+                    if user.dm_channel == None: await user.create_dm()
+
+                    await user.dm_channel.send(msg)
+
+                await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+
+            async def checkreaction(message):
+                if not message.author.guild_permissions.manage_roles:
+                    await message.channel.send("you dont have enough permissions to do that!")
+                    return
+                    
+                emoji = message.content.split("!newsletter checkreaction ")
+                if len(emoji) == 1:
+                    return
+                else:
+                    emoji = emoji[1]
+
+                responses = []
+
+                async with message.channel.typing():
+                    c.execute("SELECT * FROM newsletter")
+                    
+                    for id in c.fetchall():
+                        user = client.get_user(int(id[0]))
+                        print(user.dm_channel)
+                        if user == None:
+                            continue
+                        if user.dm_channel == None: await user.create_dm()
+
+                        async for message2 in user.dm_channel.history():
+                            print(message.content)
+                            if message2.author == client.user:
+                                
+                                if discord.utils.find(lambda r: r.emoji == emoji, message2.reactions):
+                                    responses.append(user.display_name)
+                                break
+
+                await message.channel.send("```%s\n```"%"\n".join(responses))
+            
+        method = getattr(newsSubcommands, message.content.split(" ")[1], False)
+        if method:
+            await method(message)
+        else:
+            await message.channel.send("usage: !newsletter <join/leave>")
+
+    async def ban(message):
+        banrole = get_role(457289218373451797)
+        if message.author.guild_permissions.manage_roles:
+
+            for member in message.mentions:
+                await member.add_roles(banrole)
+
+            await asyncio.sleep(60*3)
+
+            for member in message.mentions:
+                await member.remove_roles(banrole)
+
+        else:
+            await message.author.add_roles(banrole)
+            await asyncio.sleep(60*3)
+            await message.author.remove_roles(banrole)
             
 
 def get_role(id):
@@ -342,9 +445,12 @@ def findColor(colors):
 async def updater():
     global guild, captains, teams
     await client.wait_until_ready()
-    await asyncio.sleep(5)
+    await asyncio.sleep(60*5)
     while True:
 
+        #ban banned role
+        for channel in guild.channels:
+            await channel.set_permissions(get_role(457289218373451797), send_messages=False)
         #update nicknames
         for member in guild.members:
 
@@ -386,7 +492,7 @@ async def updater():
                 #     pass
 
         #update standings
-        raw = await request("https://toolbox.tet.io/go4/vrclechoarena_eu/season-1/")
+        raw = await request("https://toolbox.tet.io/go4/vrlechoarena_eu/season-2018/")
         soup = BeautifulSoup(raw)
         tmp = teams.copy().items()
         for team, metadata in tmp:
@@ -399,7 +505,7 @@ async def updater():
             teams[team]["points"] = int(entry.contents[3].contents[0])
 
         #update role and channel order
-        roleoffset = 3
+        roleoffset = 6
         rolecount = len(guild.roles)-1
         teamlist = []
         tmp = teams.copy().items()
@@ -414,7 +520,7 @@ async def updater():
         #update emoji's
         tmp = teams.copy().items()
         for team, metadata in tmp:
-            team = team.replace(" ","").replace("-","")
+            team = atozfilter.sub("", team.replace("союз","SOYUZ"))
             eslId = metadata.get("eslId")
             if eslId == None:
                 continue
@@ -461,7 +567,7 @@ async def cupTask():
     while True:
 
         cups = []
-        raw = await eslApi("/play/v1/leagues?types=&states=inProgress,upcoming&skill_levels=&limit.total=8&path=%2Fplay%2Fechoarena%2Feurope%2F&portals=&tags=vrclechoarena-eu-portal&includeHidden=0")
+        raw = await eslApi("/play/v1/leagues?&states=inProgress,upcoming&path=%2Fplay%2Fechoarena%2F&portals=&tags=vrlechoarena-eu-portal&includeHidden=0")
         for cup in raw.values():
             if "cup" not in cup["name"]["full"].lower():
                 continue
@@ -546,10 +652,45 @@ async def on_member_update(before, after):
 
 @client.event
 async def on_message(message):
+    if message.author == client.user: return
+
     if message.content.startswith("!"):
         method = getattr(botCommands, message.content.split(" ")[0][1:], False)
         if method:
             await method(message)
+    if message.content == "^" and message.author.id == 176810272512671744:
+        await message.channel.send("^")
+
+    lower = message.content.lower()
+    caps = 0
+    for i, char in enumerate(message.content):
+        if char != lower[i]:
+            caps += 1
+    try:
+        if caps/len(message.content) > 0.6 and message.channel.id == 427929531278426123:
+            await message.channel.send("WHY ARE YOU SCREAMING", tts=True)
+            await message.add_reaction(discord.utils.find(lambda e: e.name == "magic", guild.emojis))
+    except ZeroDivisionError:
+        pass
+
+    if "needs more jpeg" in message.content.lower():
+        async for message2 in message.channel.history(limit=5):
+            if message2.author == client.user: continue
+            if len(message2.attachments) == 0: continue
+            if not message2.attachments[0].height: continue
+
+            rawimg = io.BytesIO()
+            await message2.attachments[0].save(rawimg, seek_begin=True)
+            img = Image.open(rawimg).convert("RGB")
+            outimg = io.BytesIO()
+            img.save(outimg, "JPEG", quality=10)
+            outimg.seek(0)
+            await message2.channel.send(file=discord.File(outimg, filename="neededmorejpeg.jpeg"))
+
+            break
+        else:
+            await message.add_reaction("\u2753")
+
 
 
 async def errorCatcher(task):
