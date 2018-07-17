@@ -347,6 +347,10 @@ class botCommands:
             await message.author.add_roles(banrole)
             await asyncio.sleep(60*3)
             await message.author.remove_roles(banrole)
+
+    async def joke(message):
+        if message.channel.id == 427929531278426123:
+            await message.channel.send(await request("https://icanhazdadjoke.com/", {"Accept": "text/plain"}))
             
 
 def get_role(id):
@@ -369,12 +373,12 @@ async def eslApi(path):
     raw = await request("https://api.eslgaming.com"+path)
     return json.loads(raw)
 
-async def request(url):
+async def request(url, headers=None):
     global http
     while True:
         try:
             with async_timeout.timeout(30):
-                async with http.get(url) as response:
+                async with http.get(url, headers=headers) as response:
                     return await response.text()
         except aiohttp.client_exceptions.ServerDisconnectedError:
             pass
@@ -674,16 +678,22 @@ async def on_message(message):
         pass
 
     if "needs more jpeg" in message.content.lower():
-        async for message2 in message.channel.history(limit=5):
+        async for message2 in message.channel.history(limit=15):
             if message2.author == client.user: continue
             if len(message2.attachments) == 0: continue
             if not message2.attachments[0].height: continue
+
+            num = re.findall(r"\d{2}", message.content)
+            if len(num) != 0 and num[0].isdigit() and 0 <= int(num[0]) <= 100:
+                num = int(num[0])
+            else:
+                num = 10
 
             rawimg = io.BytesIO()
             await message2.attachments[0].save(rawimg, seek_begin=True)
             img = Image.open(rawimg).convert("RGB")
             outimg = io.BytesIO()
-            img.save(outimg, "JPEG", quality=10)
+            img.save(outimg, "JPEG", quality=num)
             outimg.seek(0)
             await message2.channel.send(file=discord.File(outimg, filename="neededmorejpeg.jpeg"))
 
