@@ -12,7 +12,7 @@ debug = False
 devnull = open(os.devnull, "w")
 
 client = discord.Client()
-logoPattern = re.compile(r'src="(https://cdn-eslgaming.akamaized.net/play/eslgfx/gfx/logos/teams/.*?)" id="team_logo_overlay_image"')
+logoPattern = re.compile(r'src="(https://cdn-eslgaming\.akamaized\.net/play/eslgfx/gfx/logos/teams/.*?)" id="team_logo_overlay_image"')
 warnings.filterwarnings("ignore")
 
 conn = sqlite3.connect("data.db")
@@ -146,12 +146,12 @@ class botCommands:
                 color = findColor(list(list(i.color.to_rgb()) for i in guild.roles))
                 color = discord.Color.from_rgb(color[0],color[1],color[2])
                 
-                newChannel = await guild.create_text_channel(name="team%s"%teamname.lower().replace(" ",""), category=teamsCategory, reason="creating new team")
-                newRole = await guild.create_role(name=teamname.lower(), hoist=True, mentionable=True, colour=color, reason="creating new team")
+                #newChannel = await guild.create_text_channel(name="team%s"%teamname.lower().replace(" ",""), category=teamsCategory, reason="creating new team")
+                newRole = await guild.create_role(name=teamname.lower(), hoist=True, mentionable=True, reason="creating new team")
                             
                 teams[teamname.lower()] = {"name": teamname,
                                    "points": 0,
-                                   "channelId": newChannel.id,
+                #                   "channelId": newChannel.id,
                                    "roleId": newRole.id
                                    }
                 save()
@@ -180,7 +180,7 @@ class botCommands:
                 except AttributeError:
                     pass
                 await get_role(teams[teamname.lower()]["roleId"]).delete(reason="deleting team")
-                await client.get_channel(teams[teamname.lower()]["channelId"]).edit(category=archiveCategory, sync_permissions=True,reason="deleting team")
+                #await client.get_channel(teams[teamname.lower()]["channelId"]).edit(category=archiveCategory, sync_permissions=True,reason="deleting team")
                 teams.pop(teamname.lower())
                 save()
 
@@ -228,10 +228,10 @@ class botCommands:
                     await message.channel.send("could not find team \"%s\""%teamNames[1])
                     return
 
-                await client.get_channel(teams[teamNames[1].lower()]["channelId"]).edit(name="team%s"%teamNames[0].lower().replace(" ",""), reason="renaming team")
+                #await client.get_channel(teams[teamNames[1].lower()]["channelId"]).edit(name="team%s"%teamNames[0].lower().replace(" ",""), reason="renaming team")
                 await get_role(teams[teamNames[1].lower()]["roleId"]).edit(name=teamNames[0].lower(), reason="renaming team")
                 try:
-                    await discord.utils.find(lambda e: e.name == teamNames[1].lower().replace(" ","").replace("-",""), guild.emojis).edit(name=teamNames[0].lower().replace(" ","").replace("-",""), reason="renaming team")
+                    await discord.utils.find(lambda e: e.name == atozfilter.sub("", teamNames[1].lower()), guild.emojis).edit(name=atozfilter.sub("", teamNames[0].lower()), reason="renaming team")
                 except AttributeError:
                     pass
                 
@@ -351,6 +351,65 @@ class botCommands:
     async def joke(message):
         if message.channel.id == 427929531278426123:
             await message.channel.send(await request("https://icanhazdadjoke.com/", {"Accept": "text/plain"}))
+
+    async def role(message):
+        args = message.content.split()
+        if len(args) < 2:
+            await message.channel.send("usage: !role <add/remove/list> <role name>")
+            return
+        command = args[1]
+        if len(args) < 3 and command != "list":
+            await message.channel.send("usage: !role <add/remove/list> <role name>")
+            return
+        rolename = " ".join(args[2:]).lower()
+
+        settableRoles = ["ESL Echo Arena", "ESL Echo Combat", "Searching For Team Echo Arena", "Searching For Team Echo Combat"]
+
+        if command == "add":
+            role = discord.utils.find(lambda r: r.name.lower() == rolename.lower(), guild.roles)
+            if role:
+                if role.name.lower() == "Searching For Team Echo Arena".lower() and message.author.id == 176810272512671744:
+                    await message.add_reaction(u"\N{CROSS MARK}")
+                    return
+                if role.name in settableRoles:
+                    await message.author.add_roles(role)
+                    await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+                    return
+                else:
+                    await message.channel.send("You can't set that role!")
+                    return
+            else:
+                await message.channel.send("That role does not exist!")
+                return
+
+        elif command == "remove":
+            role = discord.utils.find(lambda r: r.name.lower() == rolename.lower(), guild.roles)
+            if role:
+                if role.name in settableRoles:
+                    await message.author.remove_roles(role)
+                    await message.add_reaction(u"\N{WHITE HEAVY CHECK MARK}")
+                    return
+                else:
+                    await message.channel.send("You can't remove that role!")
+                    return
+            else:
+                await message.channel.send("That role does not exist!")
+                return
+
+        elif command == "list":
+            await message.channel.send("Settable roles:```%s```"%"\n".join(settableRoles))
+            return
+
+        else:
+            await message.channel.send("useage: !role <add/remove/list> <role name>")
+            return
+
+    async def color(message):
+        await message.add_reaction("\u274c")
+
+    async def colour(message):
+        await message.add_reaction("\u274c")
+
             
 
 def get_role(id):
@@ -509,17 +568,17 @@ async def updater():
             teams[team]["points"] = int(entry.contents[3].contents[0])
 
         #update role and channel order
-        roleoffset = 6
+        roleoffset = 9
         rolecount = len(guild.roles)-1
         teamlist = []
         tmp = teams.copy().items()
         for team, metadata in tmp:
-            teamlist.append([metadata["points"], get_role(metadata["roleId"]), client.get_channel(metadata["channelId"])])
+            teamlist.append([metadata["points"], get_role(metadata["roleId"]), None])#client.get_channel(metadata["channelId"])])
         teamlist.sort()
         teamlist.reverse()
         for i, team in enumerate(teamlist):
             await team[1].edit(position=rolecount-i-roleoffset, reason="reordering roles according to current ESL ranking")
-            await team[2].edit(position=i+1, reason="reordering channels according to current ESL ranking")
+            #await team[2].edit(position=i+1, reason="reordering channels according to current ESL ranking")
             
         #update emoji's
         tmp = teams.copy().items()
@@ -592,12 +651,14 @@ async def cupTask():
             await asyncio.sleep(waitTime)
 
             raw = await eslApi("/play/v1/leagues/%s/contestants"%cup[1])
+            mentions = []
             for team in raw:
                 match = discord.utils.find(lambda t: t.get("eslId") == team["id"],teams.values())
                 if match == None or team["status"] != "signedUp": continue
-                mention = get_role(match["roleId"]).mention
-                await client.get_channel(match["channelId"]).send("%s Don't forget to check in! You have 15 minutes left!"%mention)
+                mentions.append(get_role(match["roleId"]).mention)
                 print("%s has not checked in, 15min left"%team)
+
+            if len(mentions) != 0: await client.get_channel(379433707855151115).send("%s Don't forget to check in! You have 15 minutes left!"%(" ".join(mentions)))
 
         waitTime = cup[0]-time.time()-180
         if waitTime > 0:
@@ -605,12 +666,14 @@ async def cupTask():
             await asyncio.sleep(waitTime)
 
             raw = await eslApi("/play/v1/leagues/%s/contestants"%cup[1])
+            mentions = []
             for team in raw:
                 match = discord.utils.find(lambda t: t.get("eslId") == team["id"],teams.values())
                 if match == None or team["status"] != "signedUp": continue
-                mention = get_role(match["roleId"]).mention
-                await client.get_channel(match["channelId"]).send("%s Don't forget to check in! You have only 3 minutes left! In the case that you wont make it, contact @ESL in the #eu_vr_challenger_league on the echo games server immediately. They should be able to help until the brackets are generated. Hurry!"%mention)
+                mentions.append(get_role(match["roleId"]).mention)
                 print("%s has not checked in, 3min left"%team["name"])
+
+            if len(mentions) != 0: await client.get_channel(379433707855151115).send("%s Don't forget to check in! You have only 3 minutes left! In the case that you wont make it, contact @ESL in the #eu_vr_challenger_league on the echo games server immediately. They should be able to help until the brackets are generated. Hurry!"%(" ".join(mentions)))
 
         await asyncio.sleep(60)
 
